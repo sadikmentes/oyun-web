@@ -18,7 +18,7 @@ function shuffle(arr) {
 class VampireEngine {
   constructor(options) {
     this.maxPlayers = options.maxPlayers;
-    this.nightDurationSec = Number(options.nightDurationSec || 30);
+    this.defaultNightDurationSec = Number(options.nightDurationSec || 30);
     this.gameType = "vampire";
     this.players = new Map();
     this.hostSocketId = null;
@@ -29,6 +29,13 @@ class VampireEngine {
     this.doctorTargetId = null;
     this.nightEndsAt = null;
     this.winner = null;
+    this.settings = {
+      vampireCount: 1,
+      doctorEnabled: true,
+      gozcuEnabled: true,
+      gozcuUses: 1,
+      nightDurationSec: this.defaultNightDurationSec
+    };
   }
 
   registerHost(socketId) {
@@ -82,7 +89,8 @@ class VampireEngine {
       name: safeName,
       connectedAt: Date.now(),
       role: null,
-      alive: true
+      alive: true,
+      gozcuUsesLeft: 0
     });
     return { ok: true, playerName: safeName };
   }
@@ -96,46 +104,80 @@ class VampireEngine {
     this.updateWinnerState();
   }
 
-  canStartRound(vampireCount) {
+  normalizeStartOptions(options) {
+    const vampireCount = Number(options && options.vampireCount ? options.vampireCount : 1);
+    const doctorEnabled = options && typeof options.doctorEnabled === "boolean" ? options.doctorEnabled : true;
+    const gozcuEnabled = options && typeof options.gozcuEnabled === "boolean" ? options.gozcuEnabled : true;
+    const gozcuUses = Number(options && options.gozcuUses ? options.gozcuUses : 1);
+    const nightDurationSec = Number(options && options.nightDurationSec ? options.nightDurationSec : this.defaultNightDurationSec);
+    return {
+      vampireCount,
+      doctorEnabled,
+      gozcuEnabled,
+      gozcuUses,
+      nightDurationSec
+    };
+  }
+
+  canStartRound(options) {
+    const normalized = this.normalizeStartOptions(options);
+
     if (this.players.size < 2) {
-      return { ok: false, reason: "Vampir Koylu oyunu icin en az 2 oyuncu gerekli." };
+      return { ok: false, reason: "Vampir Koylu oyunu icin en az 2 oyuncu gerekli.", options: normalized };
     }
-    if (vampireCount !== 1 && vampireCount !== 2) {
-      return { ok: false, reason: "Vampir sayisi 1 veya 2 olmali." };
+    if (normalized.vampireCount !== 1 && normalized.vampireCount !== 2) {
+      return { ok: false, reason: "Vampir sayisi 1 veya 2 olmali.", options: normalized };
     }
-    if (vampireCount >= this.players.size) {
-      return { ok: false, reason: "Vampir sayisi toplam oyuncudan az olmali." };
+    if (![10, 20, 30, 45, 60].includes(normalized.nightDurationSec)) {
+      return { ok: false, reason: "Gece suresi 10/20/30/45/60 olmali.", options: normalized };
     }
-    return { ok: true };
+    if (![1, 2, 3].includes(normalized.gozcuUses)) {
+      return { ok: false, reason: "Gozcu hakki 1/2/3 olmali.", options: normalized };
+    }
+
+    const requiredRoles = normalized.vampireCount + (normalized.doctorEnabled ? 1 : 0) + (normalized.gozcuEnabled ? 1 : 0);
+    if (requiredRoles > this.players.size) {
+      return { ok: false, reason: "Secilen rol ayarlari oyuncu sayisini asiyor.", options: normalized };
+    }
+    if (normalized.vampireCount >= this.players.size) {
+      return { ok: false, reason: "Vampir sayisi toplam oyuncudan az olmali.", options: normalized };
+    }
+
+    return { ok: true, options: normalized };
   }
 
   beginNight() {
     this.phase = "night";
     this.vampireVotes.clear();
     this.doctorTargetId = null;
-    this.nightEndsAt = Date.now() + (this.nightDurationSec * 1000);
+    this.nightEndsAt = Date.now() + (this.settings.nightDurationSec * 1000);
   }
 
-  startRound(vampireCount) {
+  startRound(options) {
+    const normalized = this.normalizeStartOptions(options);
+    this.settings = { ...normalized };
+
     const players = shuffle(Array.from(this.players.values()));
     for (const player of players) {
       player.alive = true;
       player.role = "koylu";
+      player.gozcuUsesLeft = 0;
     }
 
     let index = 0;
-    for (let i = 0; i < vampireCount; i += 1) {
+    for (let i = 0; i < normalized.vampireCount; i += 1) {
       players[index].role = "vampir";
       index += 1;
     }
 
-    if (players.length >= 3 && players[index]) {
+    if (normalized.doctorEnabled && players[index]) {
       players[index].role = "doktor";
       index += 1;
     }
 
-    if (players.length >= 5 && players[index]) {
-      players[index].role = "gozlemci";
+    if (normalized.gozcuEnabled && players[index]) {
+      players[index].role = "gozcu";
+      players[index].gozcuUsesLeft = normalized.gozcuUses;
     }
 
     this.roundActive = true;
@@ -154,6 +196,7 @@ class VampireEngine {
     for (const player of this.players.values()) {
       player.role = null;
       player.alive = true;
+      player.gozcuUsesLeft = 0;
     }
   }
 
@@ -171,6 +214,10 @@ class VampireEngine {
 
   getAliveDoctor() {
     return this.getAlivePlayers().find((p) => p.role === "doktor") || null;
+  }
+
+  getAliveGozcu() {
+    return this.getAlivePlayers().find((p) => p.role === "gozcu") || null;
   }
 
   getSummary() {
@@ -197,7 +244,6 @@ class VampireEngine {
       return this.winner;
     }
 
-    // Vampir tarafi oyunu, iyi tarafla esitlendiginde veya iyi taraf tamamen bittiginde kazanir.
     if (aliveVillagers === 0 || aliveVampires === aliveVillagers) {
       this.winner = "vampir";
       this.roundActive = false;
@@ -241,6 +287,30 @@ class VampireEngine {
 
     this.doctorTargetId = target.id;
     return { ok: true };
+  }
+
+  submitGozcuInspect(socketId, targetId) {
+    const gozcu = this.players.get(socketId);
+    const target = this.players.get(targetId);
+    if (!this.roundActive || this.phase !== "night") {
+      return { ok: false, reason: "Su an gece asamasinda degil." };
+    }
+    if (!gozcu || !gozcu.alive || gozcu.role !== "gozcu") {
+      return { ok: false, reason: "Bu hareket sadece hayattaki gozcu icin." };
+    }
+    if (gozcu.gozcuUsesLeft <= 0) {
+      return { ok: false, reason: "Gozcu hakkin bitti." };
+    }
+    if (!target || !target.alive || target.id === gozcu.id) {
+      return { ok: false, reason: "Gecerli bir hedef sec." };
+    }
+
+    gozcu.gozcuUsesLeft -= 1;
+    return {
+      ok: true,
+      targetName: target.name,
+      targetRole: target.role
+    };
   }
 
   isNightReadyToResolve() {
@@ -342,6 +412,7 @@ class VampireEngine {
       nightEndsAt: this.nightEndsAt,
       winner: this.winner,
       summary: this.getSummary(),
+      settings: { ...this.settings },
       players: Array.from(this.players.values()).map((player) => ({
         id: player.id,
         name: player.name,
@@ -357,6 +428,7 @@ class VampireEngine {
       nightEndsAt: this.nightEndsAt,
       winner: this.winner,
       summary: this.getSummary(),
+      settings: { ...this.settings },
       players: this.getRoomUpdatePayload().players
     };
 
@@ -365,14 +437,16 @@ class VampireEngine {
       return {
         ...base,
         role: "waiting",
-        alive: true
+        alive: true,
+        gozcuUsesLeft: 0
       };
     }
 
     return {
       ...base,
       role: player.role,
-      alive: player.alive
+      alive: player.alive,
+      gozcuUsesLeft: player.gozcuUsesLeft || 0
     };
   }
 }

@@ -85,6 +85,7 @@
     let nightEndsAt = null;
     let countdownTimer = null;
     let players = [];
+    let gozcuUsesLeft = 0;
 
     roomCodeText.textContent = roomCode || "-";
 
@@ -163,7 +164,13 @@
         return;
       }
 
-      if (myRole !== "vampir" && myRole !== "doktor") {
+      if (myRole !== "vampir" && myRole !== "doktor" && myRole !== "gozcu") {
+        actionPanel.classList.add("hidden");
+        renderNightCountdown();
+        return;
+      }
+
+      if (myRole === "gozcu" && gozcuUsesLeft <= 0) {
         actionPanel.classList.add("hidden");
         renderNightCountdown();
         return;
@@ -174,7 +181,7 @@
         if (!p.alive) {
           return false;
         }
-        if (myRole === "vampir") {
+        if (myRole === "vampir" || myRole === "gozcu") {
           return p.id !== socket.id;
         }
         return true;
@@ -186,9 +193,13 @@
         targetSelect.appendChild(option);
       }
 
-      targetLabel.textContent = myRole === "vampir"
-        ? "Oldurmek istedigin oyuncu"
-        : "Korumak istedigin oyuncu";
+      if (myRole === "vampir") {
+        targetLabel.textContent = "Oldurmek istedigin oyuncu";
+      } else if (myRole === "doktor") {
+        targetLabel.textContent = "Korumak istedigin oyuncu";
+      } else {
+        targetLabel.textContent = `Rolunu gormek istedigin oyuncu (Kalan hak: ${gozcuUsesLeft})`;
+      }
       actionPanel.classList.toggle("hidden", targetCandidates.length === 0);
       renderNightCountdown();
     }
@@ -232,6 +243,7 @@
       currentGame = "vampire";
       myRole = payload.role;
       myAlive = payload.alive !== false;
+      gozcuUsesLeft = Number(payload.gozcuUsesLeft || 0);
       currentPhase = payload.phase || currentPhase;
       nightEndsAt = payload.nightEndsAt || null;
       players = Array.isArray(payload.players) ? payload.players : players;
@@ -249,7 +261,9 @@
 
       statusText.textContent = myAlive ? "Rolun dagitildi." : "Bu turda elendin.";
       roleTitle.textContent = `Rol: ${payload.role}`;
-      roleInfo.textContent = `Faz: ${payload.phase || "-"}`;
+      roleInfo.textContent = myRole === "gozcu"
+        ? `Faz: ${payload.phase || "-"} | Kalan Hak: ${gozcuUsesLeft}`
+        : `Faz: ${payload.phase || "-"}`;
       clueWrapper.classList.add("hidden");
       showActionPanel();
     }
@@ -279,6 +293,10 @@
       }
       if (myRole === "doktor") {
         socket.emit("doctor:protect", { roomCode, targetPlayerId });
+        return;
+      }
+      if (myRole === "gozcu") {
+        socket.emit("gozcu:inspect", { roomCode, targetPlayerId });
       }
     });
 
@@ -332,6 +350,19 @@
       const text = payload.winner === "vampir" ? "Vampirler kazandi." : "Koyluler kazandi.";
       setMessage(`Oyun bitti. ${text}`);
       openPopup("Oyun Bitti", `Kazanan taraf: ${payload.winner === "vampir" ? "Vampirler" : "Koyluler"}`);
+    });
+
+    socket.on("vampire:inspect_result", (payload) => {
+      const roleMap = {
+        vampir: "Vampir",
+        doktor: "Doktor",
+        koylu: "Koylu",
+        gozcu: "Gozcu"
+      };
+      const roleText = roleMap[payload.targetRole] || payload.targetRole;
+      const text = `${payload.targetName} oyuncusunun rolu: ${roleText}`;
+      setMessage(text);
+      openPopup("Gozcu Bilgisi", text);
     });
 
     socket.on("action:ok", (payload) => {

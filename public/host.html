@@ -46,6 +46,36 @@
             <option value="1">1 Vampir</option>
             <option value="2">2 Vampir</option>
           </select>
+          <label for="nightDurationSelect">Gece Suresi</label>
+          <select id="nightDurationSelect">
+            <option value="10">10 sn</option>
+            <option value="20">20 sn</option>
+            <option value="30" selected>30 sn</option>
+            <option value="45">45 sn</option>
+            <option value="60">60 sn</option>
+          </select>
+        </div>
+
+        <div class="actions">
+          <label for="doctorEnabledSelect">Doktor</label>
+          <select id="doctorEnabledSelect">
+            <option value="true" selected>Acik</option>
+            <option value="false">Kapali</option>
+          </select>
+          <label for="gozcuEnabledSelect">Gozcu</label>
+          <select id="gozcuEnabledSelect">
+            <option value="true" selected>Acik</option>
+            <option value="false">Kapali</option>
+          </select>
+          <label for="gozcuUsesSelect">Gozcu Hakki</label>
+          <select id="gozcuUsesSelect">
+            <option value="1" selected>1 Hak</option>
+            <option value="2">2 Hak</option>
+            <option value="3">3 Hak</option>
+          </select>
+        </div>
+
+        <div class="actions">
           <button id="startVampireRoundBtn">Oyunu Baslat</button>
           <button id="resetVampireRoundBtn" class="secondary">Sifirla</button>
         </div>
@@ -56,7 +86,7 @@
         </div>
         <p class="muted">
           Geceyi Erken Bitir: sadece host icin zorlayici bitis butonu.
-          Normalde gece, tum vampir + doktor secimi tamamlaninca veya sayaç dolunca biter.
+          Normalde gece, tum vampir + doktor secimi tamamlaninca veya sayac dolunca biter.
         </p>
 
         <div class="actions">
@@ -108,6 +138,10 @@
     const impostorControls = document.getElementById("impostorControls");
     const vampireControls = document.getElementById("vampireControls");
     const vampireCountSelect = document.getElementById("vampireCountSelect");
+    const nightDurationSelect = document.getElementById("nightDurationSelect");
+    const doctorEnabledSelect = document.getElementById("doctorEnabledSelect");
+    const gozcuEnabledSelect = document.getElementById("gozcuEnabledSelect");
+    const gozcuUsesSelect = document.getElementById("gozcuUsesSelect");
 
     const startRoundBtn = document.getElementById("startRoundBtn");
     const resetRoundBtn = document.getElementById("resetRoundBtn");
@@ -126,6 +160,7 @@
     let nightEndsAt = null;
     let players = [];
     let countdownTimer = null;
+    let roundState = "waiting";
 
     function setMessage(text, isError = false) {
       hostMessage.textContent = text;
@@ -181,6 +216,10 @@
       impostorControls.classList.toggle("hidden", isVampire);
       vampireControls.classList.toggle("hidden", !isVampire);
       hostTitle.textContent = isVampire ? "Vampir Koylu - Host" : "Impostor Kelime - Host";
+
+      const canStart = roundState === "waiting";
+      startRoundBtn.classList.toggle("hidden", !canStart || isVampire);
+      startVampireRoundBtn.classList.toggle("hidden", !canStart || !isVampire);
     }
 
     function renderPlayers(list) {
@@ -273,12 +312,21 @@
       playerCount.textContent = String(payload.playerCount || 0);
       maxPlayers.textContent = String(payload.maxPlayers || 0);
       phaseText.textContent = phase;
-      roundStateText.textContent = payload.roundState || "waiting";
+      roundState = payload.roundState || "waiting";
+      roundStateText.textContent = roundState;
       renderSummary(payload.summary || null);
       renderWinner();
       renderNightCountdown();
       renderPlayers(players);
       renderDayEliminateOptions();
+
+      if (payload.settings) {
+        vampireCountSelect.value = String(payload.settings.vampireCount || 1);
+        nightDurationSelect.value = String(payload.settings.nightDurationSec || 30);
+        doctorEnabledSelect.value = String(Boolean(payload.settings.doctorEnabled));
+        gozcuEnabledSelect.value = String(Boolean(payload.settings.gozcuEnabled));
+        gozcuUsesSelect.value = String(payload.settings.gozcuUses || 1);
+      }
     });
 
     socket.on("round:error", (payload) => {
@@ -322,7 +370,13 @@
       setMessage("");
       socket.emit("host:start_round", {
         roomCode,
-        options: { vampireCount: Number(vampireCountSelect.value) }
+        options: {
+          vampireCount: Number(vampireCountSelect.value),
+          nightDurationSec: Number(nightDurationSelect.value),
+          doctorEnabled: doctorEnabledSelect.value === "true",
+          gozcuEnabled: gozcuEnabledSelect.value === "true",
+          gozcuUses: Number(gozcuUsesSelect.value)
+        }
       });
     });
 

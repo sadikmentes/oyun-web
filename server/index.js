@@ -297,14 +297,20 @@ io.on("connection", (socket) => {
       return;
     }
 
-    const vampireCount = Number(options && options.vampireCount ? options.vampireCount : 1);
-    const canStart = room.engine.canStartRound(vampireCount);
+    const startOptions = {
+      vampireCount: Number(options && options.vampireCount ? options.vampireCount : 1),
+      doctorEnabled: options && typeof options.doctorEnabled === "boolean" ? options.doctorEnabled : true,
+      gozcuEnabled: options && typeof options.gozcuEnabled === "boolean" ? options.gozcuEnabled : true,
+      gozcuUses: Number(options && options.gozcuUses ? options.gozcuUses : 1),
+      nightDurationSec: Number(options && options.nightDurationSec ? options.nightDurationSec : NIGHT_DURATION_SEC)
+    };
+    const canStart = room.engine.canStartRound(startOptions);
     if (!canStart.ok) {
       socket.emit("round:error", { message: canStart.reason });
       return;
     }
 
-    room.engine.startRound(vampireCount);
+    room.engine.startRound(canStart.options);
     scheduleNightResolution(room);
     emitRoleAssignments(room);
     emitRoomUpdate(room);
@@ -420,6 +426,31 @@ io.on("connection", (socket) => {
     if (room.engine.isNightReadyToResolve()) {
       resolveNightForRoom(room, "all_voted");
     }
+  });
+
+  socket.on("gozcu:inspect", ({ roomCode, targetPlayerId }) => {
+    const room = getRoom(roomCode);
+    if (!room || room.gameType !== "vampire") {
+      socket.emit("round:error", { message: "Vampir odasi bulunamadi." });
+      return;
+    }
+
+    const inspect = room.engine.submitGozcuInspect(socket.id, targetPlayerId);
+    if (!inspect.ok) {
+      socket.emit("round:error", { message: inspect.reason });
+      return;
+    }
+
+    socket.emit("vampire:inspect_result", {
+      targetName: inspect.targetName,
+      targetRole: inspect.targetRole
+    });
+
+    const payload = room.engine.getPlayerRolePayload(socket.id);
+    if (payload) {
+      io.to(socket.id).emit("round:assigned", payload);
+    }
+    emitRoomUpdate(room);
   });
 
   socket.on("disconnect", () => {
