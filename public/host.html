@@ -24,8 +24,6 @@
 
     <section class="panel">
       <h2>QR ve Katilim</h2>
-      <label for="baseUrlInput">ngrok / base URL</label>
-      <input id="baseUrlInput" type="text" />
       <div class="actions">
         <button id="refreshQrBtn">QR Yenile</button>
       </div>
@@ -92,7 +90,6 @@
 
     const hostTitle = document.getElementById("hostTitle");
     const roomCodeText = document.getElementById("roomCodeText");
-    const baseUrlInput = document.getElementById("baseUrlInput");
     const refreshQrBtn = document.getElementById("refreshQrBtn");
     const joinUrlText = document.getElementById("joinUrlText");
     const qrImage = document.getElementById("qrImage");
@@ -229,7 +226,7 @@
     }
 
     async function refreshQr() {
-      const base = baseUrlInput.value.trim().replace(/\/$/, "") || window.location.origin;
+      const base = window.location.origin.replace(/\/$/, "");
       const joinUrl = `${base}/join/${roomCode}`;
       joinUrlText.textContent = joinUrl;
       const response = await fetch(`/api/qr?text=${encodeURIComponent(joinUrl)}`);
@@ -252,7 +249,6 @@
       gameType = data.gameType;
       roomCodeText.textContent = roomCode;
       maxPlayers.textContent = String(data.maxPlayers);
-      baseUrlInput.value = window.location.origin;
       renderControls();
       await refreshQr();
       socket.emit("host:register", { roomCode });
