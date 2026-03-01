@@ -1,0 +1,17 @@
+services:
+  - type: web
+    name: oyun-web
+    runtime: node
+    plan: free
+    buildCommand: npm install
+    startCommand: npm start
+    autoDeploy: true
+    envVars:
+      - key: NODE_VERSION
+        value: 20.11.1
+      - key: MAX_PLAYERS
+        value: 12
+      - key: API_TIMEOUT_MS
+        value: 3000
+      - key: NIGHT_DURATION_SEC
+        value: 30

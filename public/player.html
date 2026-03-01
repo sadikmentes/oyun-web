@@ -1,0 +1,357 @@
+<!doctype html>
+<html lang="tr">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Oyuncu Ekrani</title>
+  <link rel="stylesheet" href="/styles.css" />
+</head>
+<body>
+  <main class="container player">
+    <section class="panel hero">
+      <h1>Oyuncu Ekrani</h1>
+      <p>Oda Kodu: <strong id="roomCodeText">-</strong></p>
+      <p id="statusText">Oyuna katilmak icin adini yaz.</p>
+      <p id="nightCountdownRow" class="countdown hidden">Gece bitimine: <strong id="nightCountdownText">00:00</strong></p>
+      <p id="winnerText" class="winner hidden"></p>
+    </section>
+
+    <section class="panel">
+      <div id="joinForm" class="stack">
+        <label for="nameInput">Adin</label>
+        <input id="nameInput" type="text" maxlength="24" placeholder="Ornek: Ayse" />
+        <button id="joinBtn">Katil</button>
+      </div>
+
+      <div id="roleCard" class="role hidden">
+        <h2 id="roleTitle"></h2>
+        <p id="roleInfo"></p>
+        <p id="clueWrapper" class="hidden">Kelime/Unlu: <strong id="clue"></strong></p>
+      </div>
+
+      <div id="actionPanel" class="panel action-card hidden">
+        <label for="targetSelect" id="targetLabel">Hedef Oyuncu</label>
+        <select id="targetSelect"></select>
+        <button id="sendActionBtn">Secimi Gonder</button>
+      </div>
+
+      <p id="summaryText" class="muted hidden"></p>
+      <p id="playerMessage" class="message"></p>
+    </section>
+  </main>
+
+  <div id="popupOverlay" class="popup-overlay hidden">
+    <div class="popup-card">
+      <h2 id="popupTitle">Bilgi</h2>
+      <p id="popupText"></p>
+      <button id="popupCloseBtn">Tamam</button>
+    </div>
+  </div>
+
+  <script src="/socket.io/socket.io.js"></script>
+  <script>
+    const socket = io();
+    const roomCode = (window.location.pathname.split("/")[2] || "").toUpperCase();
+
+    const roomCodeText = document.getElementById("roomCodeText");
+    const statusText = document.getElementById("statusText");
+    const nightCountdownRow = document.getElementById("nightCountdownRow");
+    const nightCountdownText = document.getElementById("nightCountdownText");
+    const winnerText = document.getElementById("winnerText");
+    const joinForm = document.getElementById("joinForm");
+    const nameInput = document.getElementById("nameInput");
+    const joinBtn = document.getElementById("joinBtn");
+    const roleCard = document.getElementById("roleCard");
+    const roleTitle = document.getElementById("roleTitle");
+    const roleInfo = document.getElementById("roleInfo");
+    const clueWrapper = document.getElementById("clueWrapper");
+    const clueEl = document.getElementById("clue");
+    const actionPanel = document.getElementById("actionPanel");
+    const targetLabel = document.getElementById("targetLabel");
+    const targetSelect = document.getElementById("targetSelect");
+    const sendActionBtn = document.getElementById("sendActionBtn");
+    const summaryText = document.getElementById("summaryText");
+    const playerMessage = document.getElementById("playerMessage");
+    const popupOverlay = document.getElementById("popupOverlay");
+    const popupTitle = document.getElementById("popupTitle");
+    const popupText = document.getElementById("popupText");
+    const popupCloseBtn = document.getElementById("popupCloseBtn");
+
+    let joined = false;
+    let myRole = "waiting";
+    let myAlive = true;
+    let currentGame = "impostor";
+    let currentPhase = "waiting";
+    let nightEndsAt = null;
+    let countdownTimer = null;
+    let players = [];
+
+    roomCodeText.textContent = roomCode || "-";
+
+    function setMessage(text, isError = false) {
+      playerMessage.textContent = text;
+      playerMessage.className = isError ? "message error" : "message";
+    }
+
+    function openPopup(title, text) {
+      popupTitle.textContent = title;
+      popupText.textContent = text;
+      popupOverlay.classList.remove("hidden");
+    }
+
+    function closePopup() {
+      popupOverlay.classList.add("hidden");
+    }
+
+    function formatCountdown(ms) {
+      const totalSec = Math.max(0, Math.ceil(ms / 1000));
+      const min = String(Math.floor(totalSec / 60)).padStart(2, "0");
+      const sec = String(totalSec % 60).padStart(2, "0");
+      return `${min}:${sec}`;
+    }
+
+    function stopCountdown() {
+      if (countdownTimer) {
+        clearInterval(countdownTimer);
+        countdownTimer = null;
+      }
+    }
+
+    function renderNightCountdown() {
+      if (currentGame !== "vampire" || currentPhase !== "night" || !nightEndsAt) {
+        nightCountdownRow.classList.add("hidden");
+        stopCountdown();
+        return;
+      }
+
+      nightCountdownRow.classList.remove("hidden");
+      const tick = () => {
+        const left = nightEndsAt - Date.now();
+        nightCountdownText.textContent = formatCountdown(left);
+        if (left <= 0) {
+          stopCountdown();
+          statusText.textContent = "Gece bitti, sonuc bekleniyor...";
+        }
+      };
+      stopCountdown();
+      tick();
+      countdownTimer = setInterval(tick, 500);
+    }
+
+    function renderWinner(winner) {
+      if (!winner) {
+        winnerText.classList.add("hidden");
+        return;
+      }
+      winnerText.classList.remove("hidden");
+      winnerText.textContent = winner === "vampir" ? "Oyun bitti: Vampirler kazandi" : "Oyun bitti: Koyluler kazandi";
+    }
+
+    function renderSummary(summary) {
+      if (!summary || currentGame !== "vampire") {
+        summaryText.classList.add("hidden");
+        return;
+      }
+      summaryText.classList.remove("hidden");
+      summaryText.textContent = `Hayatta kalanlar - Toplam: ${summary.aliveTotal}, Vampir: ${summary.aliveVampires}, Koylu tarafi: ${summary.aliveVillagers}`;
+    }
+
+    function showActionPanel() {
+      if (currentGame !== "vampire" || currentPhase !== "night" || !myAlive) {
+        actionPanel.classList.add("hidden");
+        renderNightCountdown();
+        return;
+      }
+
+      if (myRole !== "vampir" && myRole !== "doktor") {
+        actionPanel.classList.add("hidden");
+        renderNightCountdown();
+        return;
+      }
+
+      targetSelect.innerHTML = "";
+      const targetCandidates = players.filter((p) => {
+        if (!p.alive) {
+          return false;
+        }
+        if (myRole === "vampir") {
+          return p.id !== socket.id;
+        }
+        return true;
+      });
+      for (const player of targetCandidates) {
+        const option = document.createElement("option");
+        option.value = player.id;
+        option.textContent = player.name;
+        targetSelect.appendChild(option);
+      }
+
+      targetLabel.textContent = myRole === "vampir"
+        ? "Oldurmek istedigin oyuncu"
+        : "Korumak istedigin oyuncu";
+      actionPanel.classList.toggle("hidden", targetCandidates.length === 0);
+      renderNightCountdown();
+    }
+
+    function renderImpostor(payload) {
+      roleCard.classList.remove("hidden");
+      currentGame = "impostor";
+      myRole = payload.role;
+      myAlive = true;
+      currentPhase = "active";
+      nightEndsAt = null;
+      renderWinner(null);
+      renderSummary(null);
+
+      if (payload.role === "waiting") {
+        statusText.textContent = "Tur henuz baslamadi. Bekleniyor...";
+        roleTitle.textContent = "Beklemede";
+        roleInfo.textContent = "";
+        clueWrapper.classList.add("hidden");
+        renderNightCountdown();
+        return;
+      }
+
+      statusText.textContent = "Rolun dagitildi.";
+      if (payload.role === "impostor") {
+        roleTitle.textContent = "Sen impostorsun";
+        roleInfo.textContent = `Kategori: ${payload.category || "-"}`;
+        clueWrapper.classList.add("hidden");
+      } else {
+        roleTitle.textContent = "Normal Oyuncu";
+        roleInfo.textContent = `Kategori: ${payload.category || "-"}`;
+        clueEl.textContent = payload.clue || "-";
+        clueWrapper.classList.remove("hidden");
+      }
+      actionPanel.classList.add("hidden");
+      renderNightCountdown();
+    }
+
+    function renderVampire(payload) {
+      roleCard.classList.remove("hidden");
+      currentGame = "vampire";
+      myRole = payload.role;
+      myAlive = payload.alive !== false;
+      currentPhase = payload.phase || currentPhase;
+      nightEndsAt = payload.nightEndsAt || null;
+      players = Array.isArray(payload.players) ? payload.players : players;
+      renderWinner(payload.winner || null);
+      renderSummary(payload.summary || null);
+
+      if (payload.role === "waiting") {
+        roleTitle.textContent = "Beklemede";
+        roleInfo.textContent = "Host oyunu baslatinca rol dagitilacak.";
+        statusText.textContent = "Rol bekleniyor...";
+        clueWrapper.classList.add("hidden");
+        showActionPanel();
+        return;
+      }
+
+      statusText.textContent = myAlive ? "Rolun dagitildi." : "Bu turda elendin.";
+      roleTitle.textContent = `Rol: ${payload.role}`;
+      roleInfo.textContent = `Faz: ${payload.phase || "-"}`;
+      clueWrapper.classList.add("hidden");
+      showActionPanel();
+    }
+
+    joinBtn.addEventListener("click", () => {
+      const name = nameInput.value.trim();
+      if (!roomCode) {
+        setMessage("Gecersiz oda.", true);
+        return;
+      }
+      if (!name) {
+        setMessage("Isim zorunlu.", true);
+        return;
+      }
+      socket.emit("player:join", { roomCode, name });
+    });
+
+    sendActionBtn.addEventListener("click", () => {
+      const targetPlayerId = targetSelect.value;
+      if (!targetPlayerId) {
+        return;
+      }
+
+      if (myRole === "vampir") {
+        socket.emit("vampire:vote_kill", { roomCode, targetPlayerId });
+        return;
+      }
+      if (myRole === "doktor") {
+        socket.emit("doctor:protect", { roomCode, targetPlayerId });
+      }
+    });
+
+    socket.on("player:joined", (payload) => {
+      joined = true;
+      currentGame = payload.gameType;
+      joinForm.classList.add("hidden");
+      statusText.textContent = `Odaya katildin: ${payload.playerName}. Tur bekleniyor...`;
+      setMessage("");
+    });
+
+    socket.on("room:update", (payload) => {
+      if (payload.roomCode !== roomCode) {
+        return;
+      }
+      currentPhase = payload.phase || currentPhase;
+      nightEndsAt = payload.nightEndsAt || null;
+      players = Array.isArray(payload.players) ? payload.players : players;
+      renderWinner(payload.winner || null);
+      renderSummary(payload.summary || null);
+      showActionPanel();
+    });
+
+    socket.on("round:assigned", (payload) => {
+      if (!joined || !payload) {
+        return;
+      }
+      if (payload.game === "vampire") {
+        renderVampire(payload);
+        return;
+      }
+      renderImpostor(payload);
+    });
+
+    socket.on("vampire:night_result", (payload) => {
+      const reasonText = payload.reason === "timeout" ? "Sure bitti. " : "";
+      const message = payload.killedPlayerName
+        ? `Gece sonucu: ${reasonText}${payload.killedPlayerName} elendi.`
+        : `Gece sonucu: ${reasonText}Kimse elenmedi.`;
+      setMessage(message);
+      openPopup("Gece Sonucu", message);
+      renderNightCountdown();
+    });
+
+    socket.on("vampire:day_result", (payload) => {
+      setMessage(`Gunduz sonucu: ${payload.eliminatedPlayerName} elendi.`);
+    });
+
+    socket.on("vampire:game_over", (payload) => {
+      renderWinner(payload.winner || null);
+      const text = payload.winner === "vampir" ? "Vampirler kazandi." : "Koyluler kazandi.";
+      setMessage(`Oyun bitti. ${text}`);
+      openPopup("Oyun Bitti", `Kazanan taraf: ${payload.winner === "vampir" ? "Vampirler" : "Koyluler"}`);
+    });
+
+    socket.on("action:ok", (payload) => {
+      setMessage(payload.message || "Islem kaydedildi.");
+    });
+
+    socket.on("round:error", (payload) => {
+      setMessage(payload.message || "Bilinmeyen hata", true);
+    });
+
+    socket.on("connect_error", () => {
+      setMessage("Sunucuya baglanilamadi.", true);
+    });
+
+    popupCloseBtn.addEventListener("click", closePopup);
+    popupOverlay.addEventListener("click", (event) => {
+      if (event.target === popupOverlay) {
+        closePopup();
+      }
+    });
+  </script>
+</body>
+</html>

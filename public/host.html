@@ -1,0 +1,376 @@
+<!doctype html>
+<html lang="tr">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Oda Host</title>
+  <link rel="stylesheet" href="/styles.css" />
+</head>
+<body>
+  <main class="container">
+    <section class="panel hero">
+      <h1 id="hostTitle">Host Panel</h1>
+      <p class="muted">Oda kodu ile oyunculari topla, turu baslat, gece-gunduz akisina gore oyunu yonet.</p>
+      <div class="stats-grid">
+        <div><span>Oda Kodu</span><strong id="roomCodeText">-</strong></div>
+        <div><span>Oyuncu</span><strong><span id="playerCount">0</span> / <span id="maxPlayers">12</span></strong></div>
+        <div><span>Faz</span><strong id="phaseText">waiting</strong></div>
+        <div><span>Tur</span><strong id="roundStateText">waiting</strong></div>
+      </div>
+      <p id="summaryText" class="muted hidden"></p>
+      <p id="winnerText" class="winner hidden"></p>
+      <p id="nightCountdownRow" class="countdown hidden">Gece sayaci: <strong id="nightCountdownText">00:00</strong></p>
+    </section>
+
+    <section class="panel">
+      <h2>QR ve Katilim</h2>
+      <label for="baseUrlInput">ngrok / base URL</label>
+      <input id="baseUrlInput" type="text" />
+      <div class="actions">
+        <button id="refreshQrBtn">QR Yenile</button>
+      </div>
+      <p id="joinUrlText" class="muted"></p>
+      <img id="qrImage" alt="QR kod" />
+    </section>
+
+    <section class="panel">
+      <h2>Oyun Kontrolleri</h2>
+
+      <div id="impostorControls" class="actions hidden">
+        <button id="startRoundBtn">Turu Baslat</button>
+        <button id="resetRoundBtn" class="secondary">Yeni Tur</button>
+      </div>
+
+      <div id="vampireControls" class="stack hidden">
+        <div class="actions">
+          <label for="vampireCountSelect">Vampir Sayisi</label>
+          <select id="vampireCountSelect">
+            <option value="1">1 Vampir</option>
+            <option value="2">2 Vampir</option>
+          </select>
+          <button id="startVampireRoundBtn">Oyunu Baslat</button>
+          <button id="resetVampireRoundBtn" class="secondary">Sifirla</button>
+        </div>
+
+        <div class="actions">
+          <button id="resolveNightBtn" class="secondary">Geceyi Erken Bitir (Host)</button>
+          <button id="startNightBtn" class="secondary">Yeni Gece Baslat</button>
+        </div>
+        <p class="muted">
+          Geceyi Erken Bitir: sadece host icin zorlayici bitis butonu.
+          Normalde gece, tum vampir + doktor secimi tamamlaninca veya sayaç dolunca biter.
+        </p>
+
+        <div class="actions">
+          <label for="dayEliminateSelect">Gunduz Oylamasi (Host)</label>
+          <select id="dayEliminateSelect"></select>
+          <button id="dayEliminateBtn" class="danger">Oyuncuyu Ele</button>
+        </div>
+      </div>
+
+      <p id="hostMessage" class="message"></p>
+    </section>
+
+    <section class="panel">
+      <h2>Oyuncular</h2>
+      <ul id="playerList" class="player-list"></ul>
+    </section>
+  </main>
+
+  <div id="popupOverlay" class="popup-overlay hidden">
+    <div class="popup-card">
+      <h2 id="popupTitle">Bilgi</h2>
+      <p id="popupText"></p>
+      <button id="popupCloseBtn">Tamam</button>
+    </div>
+  </div>
+
+  <script src="/socket.io/socket.io.js"></script>
+  <script>
+    const socket = io();
+    const roomCode = (window.location.pathname.split("/")[2] || "").toUpperCase();
+
+    const hostTitle = document.getElementById("hostTitle");
+    const roomCodeText = document.getElementById("roomCodeText");
+    const baseUrlInput = document.getElementById("baseUrlInput");
+    const refreshQrBtn = document.getElementById("refreshQrBtn");
+    const joinUrlText = document.getElementById("joinUrlText");
+    const qrImage = document.getElementById("qrImage");
+    const playerCount = document.getElementById("playerCount");
+    const maxPlayers = document.getElementById("maxPlayers");
+    const phaseText = document.getElementById("phaseText");
+    const roundStateText = document.getElementById("roundStateText");
+    const summaryText = document.getElementById("summaryText");
+    const winnerText = document.getElementById("winnerText");
+    const nightCountdownRow = document.getElementById("nightCountdownRow");
+    const nightCountdownText = document.getElementById("nightCountdownText");
+    const hostMessage = document.getElementById("hostMessage");
+    const playerList = document.getElementById("playerList");
+    const dayEliminateSelect = document.getElementById("dayEliminateSelect");
+    const dayEliminateBtn = document.getElementById("dayEliminateBtn");
+    const impostorControls = document.getElementById("impostorControls");
+    const vampireControls = document.getElementById("vampireControls");
+    const vampireCountSelect = document.getElementById("vampireCountSelect");
+
+    const startRoundBtn = document.getElementById("startRoundBtn");
+    const resetRoundBtn = document.getElementById("resetRoundBtn");
+    const startVampireRoundBtn = document.getElementById("startVampireRoundBtn");
+    const resolveNightBtn = document.getElementById("resolveNightBtn");
+    const startNightBtn = document.getElementById("startNightBtn");
+    const resetVampireRoundBtn = document.getElementById("resetVampireRoundBtn");
+    const popupOverlay = document.getElementById("popupOverlay");
+    const popupTitle = document.getElementById("popupTitle");
+    const popupText = document.getElementById("popupText");
+    const popupCloseBtn = document.getElementById("popupCloseBtn");
+
+    let gameType = "impostor";
+    let phase = "waiting";
+    let winner = null;
+    let nightEndsAt = null;
+    let players = [];
+    let countdownTimer = null;
+
+    function setMessage(text, isError = false) {
+      hostMessage.textContent = text;
+      hostMessage.className = isError ? "message error" : "message";
+    }
+
+    function openPopup(title, text) {
+      popupTitle.textContent = title;
+      popupText.textContent = text;
+      popupOverlay.classList.remove("hidden");
+    }
+
+    function closePopup() {
+      popupOverlay.classList.add("hidden");
+    }
+
+    function formatCountdown(ms) {
+      const totalSec = Math.max(0, Math.ceil(ms / 1000));
+      const min = String(Math.floor(totalSec / 60)).padStart(2, "0");
+      const sec = String(totalSec % 60).padStart(2, "0");
+      return `${min}:${sec}`;
+    }
+
+    function stopCountdown() {
+      if (countdownTimer) {
+        clearInterval(countdownTimer);
+        countdownTimer = null;
+      }
+    }
+
+    function renderNightCountdown() {
+      if (gameType !== "vampire" || phase !== "night" || !nightEndsAt) {
+        nightCountdownRow.classList.add("hidden");
+        stopCountdown();
+        return;
+      }
+
+      nightCountdownRow.classList.remove("hidden");
+      const tick = () => {
+        const left = nightEndsAt - Date.now();
+        nightCountdownText.textContent = formatCountdown(left);
+        if (left <= 0) {
+          stopCountdown();
+        }
+      };
+      stopCountdown();
+      tick();
+      countdownTimer = setInterval(tick, 500);
+    }
+
+    function renderControls() {
+      const isVampire = gameType === "vampire";
+      impostorControls.classList.toggle("hidden", isVampire);
+      vampireControls.classList.toggle("hidden", !isVampire);
+      hostTitle.textContent = isVampire ? "Vampir Koylu - Host" : "Impostor Kelime - Host";
+    }
+
+    function renderPlayers(list) {
+      playerList.innerHTML = "";
+      for (const player of list || []) {
+        const li = document.createElement("li");
+        const alive = player.alive ? "hayatta" : "elendi";
+        li.textContent = `${player.name} (${alive})`;
+        playerList.appendChild(li);
+      }
+    }
+
+    function renderDayEliminateOptions() {
+      dayEliminateSelect.innerHTML = "";
+      const alive = players.filter((p) => p.alive);
+      for (const player of alive) {
+        const opt = document.createElement("option");
+        opt.value = player.id;
+        opt.textContent = player.name;
+        dayEliminateSelect.appendChild(opt);
+      }
+      const canEliminate = gameType === "vampire" && phase === "day" && alive.length > 0 && !winner;
+      dayEliminateBtn.disabled = !canEliminate;
+      dayEliminateSelect.disabled = !canEliminate;
+    }
+
+    function renderWinner() {
+      if (!winner) {
+        winnerText.classList.add("hidden");
+        return;
+      }
+      winnerText.classList.remove("hidden");
+      winnerText.textContent = winner === "vampir" ? "Kazanan: Vampirler" : "Kazanan: Koyluler";
+    }
+
+    function renderSummary(summary) {
+      if (!summary || gameType !== "vampire") {
+        summaryText.classList.add("hidden");
+        return;
+      }
+      summaryText.classList.remove("hidden");
+      summaryText.textContent = `Hayatta kalanlar - Toplam: ${summary.aliveTotal}, Vampir: ${summary.aliveVampires}, Koylu tarafi: ${summary.aliveVillagers}`;
+    }
+
+    async function refreshQr() {
+      const base = baseUrlInput.value.trim().replace(/\/$/, "") || window.location.origin;
+      const joinUrl = `${base}/join/${roomCode}`;
+      joinUrlText.textContent = joinUrl;
+      const response = await fetch(`/api/qr?text=${encodeURIComponent(joinUrl)}`);
+      if (!response.ok) {
+        throw new Error("QR olusturulamadi.");
+      }
+      const data = await response.json();
+      qrImage.src = data.dataUrl;
+    }
+
+    async function loadRoomInfo() {
+      if (!roomCode) {
+        throw new Error("Gecersiz oda.");
+      }
+      const response = await fetch(`/api/rooms/${roomCode}`);
+      if (!response.ok) {
+        throw new Error("Oda bulunamadi.");
+      }
+      const data = await response.json();
+      gameType = data.gameType;
+      roomCodeText.textContent = roomCode;
+      maxPlayers.textContent = String(data.maxPlayers);
+      baseUrlInput.value = window.location.origin;
+      renderControls();
+      await refreshQr();
+      socket.emit("host:register", { roomCode });
+    }
+
+    socket.on("host:registered", (payload) => {
+      gameType = payload.gameType;
+      renderControls();
+    });
+
+    socket.on("room:update", (payload) => {
+      if (payload.roomCode !== roomCode) {
+        return;
+      }
+      gameType = payload.gameType || gameType;
+      phase = payload.phase || "waiting";
+      winner = payload.winner || null;
+      players = payload.players || [];
+      nightEndsAt = payload.nightEndsAt || null;
+
+      renderControls();
+      playerCount.textContent = String(payload.playerCount || 0);
+      maxPlayers.textContent = String(payload.maxPlayers || 0);
+      phaseText.textContent = phase;
+      roundStateText.textContent = payload.roundState || "waiting";
+      renderSummary(payload.summary || null);
+      renderWinner();
+      renderNightCountdown();
+      renderPlayers(players);
+      renderDayEliminateOptions();
+    });
+
+    socket.on("round:error", (payload) => {
+      setMessage(payload.message || "Bilinmeyen hata", true);
+    });
+
+    socket.on("vampire:night_result", (payload) => {
+      const killed = payload.killedPlayerName ? `${payload.killedPlayerName} elendi.` : "Kimse elenmedi.";
+      const reasonText = payload.reason === "timeout" ? "Sure bitti. " : "";
+      const text = `Gece sonucu: ${reasonText}${killed}`;
+      setMessage(text);
+      openPopup("Gece Sonucu", text);
+    });
+
+    socket.on("vampire:day_result", (payload) => {
+      setMessage(`Gunduz oylamasi sonucu: ${payload.eliminatedPlayerName} elendi.`);
+    });
+
+    socket.on("vampire:game_over", (payload) => {
+      const winnerTextValue = payload.winner === "vampir" ? "Vampirler" : "Koyluler";
+      const text = `Oyun bitti. Kazanan: ${winnerTextValue}`;
+      setMessage(text);
+      openPopup("Oyun Bitti", text);
+    });
+
+    socket.on("action:ok", (payload) => {
+      setMessage(payload.message || "Islem kaydedildi.");
+    });
+
+    startRoundBtn.addEventListener("click", () => {
+      setMessage("");
+      socket.emit("host:start_round", { roomCode });
+    });
+
+    resetRoundBtn.addEventListener("click", () => {
+      setMessage("");
+      socket.emit("host:reset_round", { roomCode });
+    });
+
+    startVampireRoundBtn.addEventListener("click", () => {
+      setMessage("");
+      socket.emit("host:start_round", {
+        roomCode,
+        options: { vampireCount: Number(vampireCountSelect.value) }
+      });
+    });
+
+    resolveNightBtn.addEventListener("click", () => {
+      setMessage("");
+      socket.emit("host:resolve_night", { roomCode });
+    });
+
+    startNightBtn.addEventListener("click", () => {
+      setMessage("");
+      socket.emit("host:start_night", { roomCode });
+    });
+
+    dayEliminateBtn.addEventListener("click", () => {
+      const targetPlayerId = dayEliminateSelect.value;
+      if (!targetPlayerId) {
+        return;
+      }
+      setMessage("");
+      socket.emit("host:day_eliminate", { roomCode, targetPlayerId });
+    });
+
+    resetVampireRoundBtn.addEventListener("click", () => {
+      setMessage("");
+      socket.emit("host:reset_round", { roomCode });
+    });
+
+    refreshQrBtn.addEventListener("click", async () => {
+      try {
+        await refreshQr();
+        setMessage("QR guncellendi.");
+      } catch (error) {
+        setMessage(error.message, true);
+      }
+    });
+
+    popupCloseBtn.addEventListener("click", closePopup);
+    popupOverlay.addEventListener("click", (event) => {
+      if (event.target === popupOverlay) {
+        closePopup();
+      }
+    });
+
+    loadRoomInfo().catch((error) => setMessage(error.message, true));
+  </script>
+</body>
+</html>
