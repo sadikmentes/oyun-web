@@ -20,7 +20,12 @@
       <article class="panel game-card">
         <h2>Impostor Kelime</h2>
         <p class="muted">Herkese ayni kelime/Unlu gider, 1 kisi impostor olur.</p>
-        <button id="createImpostorBtn">Impostor Odasi Ac</button>
+        <div class="stack">
+          <button id="createImpostorBtn">Impostor Odasi Kur (Host)</button>
+          <label for="joinImpostorCodeInput">Oda koduyla katil</label>
+          <input id="joinImpostorCodeInput" type="text" maxlength="8" placeholder="Ornek: AB12CD" />
+          <button id="joinImpostorBtn" class="secondary">Impostor Odasina Katil</button>
+        </div>
       </article>
 
       <article class="panel game-card">
@@ -28,7 +33,12 @@
         <p class="muted">
           Gece vampir secim yapar, doktor korur. Gunduz host oylama sonucunu sisteme girer.
         </p>
-        <button id="createVampireBtn" class="secondary">Vampir Odasi Ac</button>
+        <div class="stack">
+          <button id="createVampireBtn" class="secondary">Vampir Odasi Kur (Host)</button>
+          <label for="joinVampireCodeInput">Oda koduyla katil</label>
+          <input id="joinVampireCodeInput" type="text" maxlength="8" placeholder="Ornek: AB12CD" />
+          <button id="joinVampireBtn" class="secondary">Vampir Odasina Katil</button>
+        </div>
       </article>
     </section>
 
@@ -39,11 +49,6 @@
         <li>Gece erken bitmesi icin tum vampir + doktor secimi tamamlanmali.</li>
         <li>Host isterse `Geceyi Erken Bitir` ile geceyi manuel kapatabilir.</li>
       </ul>
-      <div class="stack">
-        <label for="joinRoomCodeInput">Oda kodu ile katil</label>
-        <input id="joinRoomCodeInput" type="text" maxlength="8" placeholder="Ornek: AB12CD" />
-        <button id="joinByCodeBtn" class="secondary">Odaya Katil</button>
-      </div>
       <p id="homeMessage" class="message"></p>
     </section>
   </main>
@@ -74,6 +79,40 @@
       }
     }
 
+    function normalizeRoomCode(value) {
+      return String(value || "").trim().toUpperCase();
+    }
+
+    function validateRoomCode(roomCode) {
+      if (!roomCode) {
+        throw new Error("Lutfen oda kodu gir.");
+      }
+      if (!/^[A-Z0-9]{4,8}$/.test(roomCode)) {
+        throw new Error("Oda kodu gecersiz formatta.");
+      }
+    }
+
+    async function joinByCodeExpectedGame(inputId, expectedGameType) {
+      setMessage("");
+      try {
+        const roomCode = normalizeRoomCode(document.getElementById(inputId).value);
+        validateRoomCode(roomCode);
+
+        const response = await fetch(`/api/rooms/${roomCode}`);
+        if (!response.ok) {
+          throw new Error("Bu oda kodu bulunamadi.");
+        }
+        const room = await response.json();
+        if (room.gameType !== expectedGameType) {
+          const gameLabel = expectedGameType === "vampire" ? "Vampir Koylu" : "Impostor";
+          throw new Error(`Bu oda ${gameLabel} odasi degil.`);
+        }
+        window.location.href = `/join/${roomCode}`;
+      } catch (error) {
+        setMessage(error.message, true);
+      }
+    }
+
     document.getElementById("createImpostorBtn").addEventListener("click", () => {
       createRoom("impostor");
     });
@@ -82,18 +121,12 @@
       createRoom("vampire");
     });
 
-    document.getElementById("joinByCodeBtn").addEventListener("click", () => {
-      const input = document.getElementById("joinRoomCodeInput");
-      const roomCode = String(input.value || "").trim().toUpperCase();
-      if (!roomCode) {
-        setMessage("Lutfen oda kodu gir.", true);
-        return;
-      }
-      if (!/^[A-Z0-9]{4,8}$/.test(roomCode)) {
-        setMessage("Oda kodu gecersiz formatta.", true);
-        return;
-      }
-      window.location.href = `/join/${roomCode}`;
+    document.getElementById("joinImpostorBtn").addEventListener("click", () => {
+      joinByCodeExpectedGame("joinImpostorCodeInput", "impostor");
+    });
+
+    document.getElementById("joinVampireBtn").addEventListener("click", () => {
+      joinByCodeExpectedGame("joinVampireCodeInput", "vampire");
     });
   </script>
 </body>
