@@ -7,8 +7,9 @@
   <link rel="stylesheet" href="/styles.css" />
 </head>
 <body>
-  <main class="container">
+  <main class="container home-layout">
     <section class="panel hero">
+      <p class="eyebrow">Hizli Kurulum</p>
       <h1>Parti Oyun Merkezi</h1>
       <p class="lead">
         Oyun sec, oda olustur, QR ile oyunculari topla.
@@ -17,7 +18,7 @@
     </section>
 
     <section class="cards">
-      <article class="panel game-card">
+      <article class="panel game-card impostor-card">
         <h2>Impostor Kelime</h2>
         <p class="muted">Herkese ayni kelime/Unlu gider, 1 kisi impostor olur.</p>
         <div class="stack">
@@ -28,7 +29,7 @@
         </div>
       </article>
 
-      <article class="panel game-card">
+      <article class="panel game-card vampire-card">
         <h2>Vampir Koylu</h2>
         <p class="muted">
           Gece vampir secim yapar, doktor korur. Gunduz host oylama sonucunu sisteme girer.
@@ -44,14 +45,15 @@
 
     <section class="panel">
       <h2>Hizli Kurallar</h2>
-      <ul class="player-list">
+      <ul class="rule-list">
         <li>Gece sayaci bitince sistem otomatik gece sonucunu aciklar.</li>
         <li>Gece erken bitmesi icin tum vampir + doktor secimi tamamlanmali.</li>
         <li>Iki vampir varsa ayni hedefte anlasmazlarsa o gece kimse elenmez.</li>
         <li>Gece fazinda genel sohbet acilir; vampirler ek olarak ozel vampir sohbetini kullanir.</li>
         <li>Host isterse `Geceyi Erken Bitir` ile geceyi manuel kapatabilir.</li>
       </ul>
-      <p id="homeMessage" class="message"></p>
+      <p class="panel-note">Ipuclari: Oda kodunu buyuk harf ve bosluksuz gir.</p>
+      <p id="homeMessage" class="message" aria-live="polite"></p>
     </section>
   </main>
 

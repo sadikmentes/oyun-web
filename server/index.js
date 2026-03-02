@@ -33,6 +33,7 @@ const joinRate = new Map();
 const chatRate = new Map();
 const socketRoom = new Map();
 const nightTimers = new Map();
+const emptyRoomCleanupTimers = new Map();
 
 function nowSec() {
   return Math.floor(Date.now() / 1000);
@@ -120,11 +121,48 @@ function createRoom(gameType) {
   return room;
 }
 
+function clearEmptyRoomCleanup(roomCode) {
+  const normalizedCode = String(roomCode || "").trim().toUpperCase();
+  if (!normalizedCode) {
+    return;
+  }
+  const timer = emptyRoomCleanupTimers.get(normalizedCode);
+  if (!timer) {
+    return;
+  }
+  clearTimeout(timer);
+  emptyRoomCleanupTimers.delete(normalizedCode);
+}
+
+function scheduleEmptyRoomCleanup(roomCode) {
+  const normalizedCode = String(roomCode || "").trim().toUpperCase();
+  if (!normalizedCode) {
+    return;
+  }
+  clearEmptyRoomCleanup(normalizedCode);
+  const timer = setTimeout(() => {
+    const room = rooms.get(normalizedCode);
+    if (!room) {
+      return;
+    }
+    const noHost = !room.engine.hostSocketId;
+    const noPlayers = room.engine.players.size === 0;
+    if (noHost && noPlayers) {
+      deleteRoom(normalizedCode);
+    } else {
+      clearEmptyRoomCleanup(normalizedCode);
+    }
+  }, 45000);
+  timer.unref();
+  emptyRoomCleanupTimers.set(normalizedCode, timer);
+}
+
 function touchRoom(room) {
   if (!room) {
     return;
   }
   room.lastActivityAt = Date.now();
+  clearEmptyRoomCleanup(room.code);
 }
 
 function getRoom(roomCode) {
@@ -143,6 +181,7 @@ function deleteRoom(roomCode) {
   if (!normalizedCode) {
     return;
   }
+  clearEmptyRoomCleanup(normalizedCode);
   clearNightTimer(normalizedCode);
   rooms.delete(normalizedCode);
 }
@@ -737,7 +776,8 @@ io.on("connection", (socket) => {
     room.engine.removePlayer(socket.id);
     touchRoom(room);
     if (room.engine.players.size === 0 && !room.engine.hostSocketId) {
-      deleteRoom(room.code);
+      // Host refreshes cause a short disconnect. Keep room alive briefly.
+      scheduleEmptyRoomCleanup(room.code);
       return;
     }
     emitRoleAssignments(room);

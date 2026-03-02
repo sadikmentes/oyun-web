@@ -7,46 +7,47 @@
   <link rel="stylesheet" href="/styles.css" />
 </head>
 <body>
-  <main class="container player">
+  <main class="container player player-layout">
     <section class="panel hero">
+      <p class="eyebrow">Oyuncu Oturumu</p>
       <h1>Oyuncu Ekrani</h1>
       <p>Oda Kodu: <strong id="roomCodeText">-</strong></p>
-      <p id="statusText">Oyuna katilmak icin adini yaz.</p>
+      <p id="statusText" class="status-line" aria-live="polite">Oyuna katilmak icin adini yaz.</p>
       <p id="nightCountdownRow" class="countdown hidden">Gece bitimine: <strong id="nightCountdownText">00:00</strong></p>
       <p id="winnerText" class="winner hidden"></p>
     </section>
 
-    <section class="panel">
+    <section class="panel interaction-panel">
       <div id="joinForm" class="stack">
         <label for="nameInput">Adin</label>
         <input id="nameInput" type="text" maxlength="24" placeholder="Ornek: Ayse" />
         <button id="joinBtn">Katil</button>
       </div>
 
-      <div id="roleCard" class="role hidden">
+      <div id="roleCard" class="role role-card hidden">
         <h2 id="roleTitle"></h2>
         <p id="roleInfo"></p>
         <p id="clueWrapper" class="hidden">Kelime/Unlu: <strong id="clue"></strong></p>
       </div>
 
-      <div id="actionPanel" class="panel action-card hidden">
+      <div id="actionPanel" class="panel action-card action-panel hidden">
         <label for="targetSelect" id="targetLabel">Hedef Oyuncu</label>
         <select id="targetSelect"></select>
         <button id="sendActionBtn">Secimi Gonder</button>
       </div>
 
-      <div id="vampireIntelPanel" class="panel action-card hidden">
+      <div id="vampireIntelPanel" class="panel action-card intel-panel hidden">
         <h2>Vampir Koordinasyonu</h2>
         <p id="vampireTeamText" class="muted"></p>
         <ul id="vampireVoteList" class="player-list compact"></ul>
         <p id="vampireConsensusText" class="muted"></p>
       </div>
 
-      <div id="nightChatPanel" class="panel action-card hidden">
+      <div id="nightChatPanel" class="panel action-card chat-panel hidden">
         <h2>Gece Sohbeti</h2>
         <p id="chatInfoText" class="muted"></p>
 
-        <div class="stack">
+        <div class="stack chat-channel">
           <h3>Genel Sohbet</h3>
           <div id="generalChatList" class="chat-list"></div>
           <div class="actions">
@@ -55,7 +56,7 @@
           </div>
         </div>
 
-        <div id="vampireChatSection" class="stack hidden">
+        <div id="vampireChatSection" class="stack chat-channel hidden">
           <h3>Vampir Ozel Sohbet</h3>
           <div id="vampireChatList" class="chat-list"></div>
           <div class="actions">
@@ -66,7 +67,7 @@
       </div>
 
       <p id="summaryText" class="muted hidden"></p>
-      <p id="playerMessage" class="message"></p>
+      <p id="playerMessage" class="message" aria-live="polite"></p>
     </section>
   </main>
 

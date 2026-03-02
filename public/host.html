@@ -7,10 +7,10 @@
   <link rel="stylesheet" href="/styles.css" />
 </head>
 <body>
-  <main class="container">
+  <main class="container host-layout">
     <section class="panel hero">
       <h1 id="hostTitle">Host Panel</h1>
-      <p class="muted">Oda kodu ile oyunculari topla, turu baslat, gece-gunduz akisina gore oyunu yonet.</p>
+      <p class="lead">Oda kodu ile oyunculari topla, turu baslat, gece-gunduz akisina gore oyunu yonet.</p>
       <div class="stats-grid">
         <div><span>Oda Kodu</span><strong id="roomCodeText">-</strong></div>
         <div><span>Oyuncu</span><strong><span id="playerCount">0</span> / <span id="maxPlayers">12</span></strong></div>
@@ -22,7 +22,7 @@
       <p id="nightCountdownRow" class="countdown hidden">Gece sayaci: <strong id="nightCountdownText">00:00</strong></p>
     </section>
 
-    <section class="panel">
+    <section class="panel qr-panel">
       <h2>QR ve Katilim</h2>
       <div class="actions">
         <button id="refreshQrBtn">QR Yenile</button>
@@ -31,7 +31,7 @@
       <img id="qrImage" alt="QR kod" />
     </section>
 
-    <section class="panel">
+    <section class="panel controls-panel">
       <h2>Oyun Kontrolleri</h2>
 
       <div id="impostorControls" class="actions hidden">
@@ -39,69 +39,78 @@
         <button id="resetRoundBtn" class="secondary">Yeni Tur</button>
       </div>
 
-      <div id="vampireControls" class="stack hidden">
-        <div class="actions">
-          <label for="vampireCountSelect">Vampir Sayisi</label>
-          <select id="vampireCountSelect">
-            <option value="1">1 Vampir</option>
-            <option value="2">2 Vampir</option>
-          </select>
-          <label for="nightDurationSelect">Gece Suresi</label>
-          <select id="nightDurationSelect">
-            <option value="10">10 sn</option>
-            <option value="20">20 sn</option>
-            <option value="30" selected>30 sn</option>
-            <option value="45">45 sn</option>
-            <option value="60">60 sn</option>
-          </select>
+      <div id="vampireControls" class="stack hidden control-stack">
+        <div class="control-block">
+          <h3 class="control-title">Rol ve Gece Ayarlari</h3>
+          <div class="actions control-row">
+            <label for="vampireCountSelect">Vampir Sayisi</label>
+            <select id="vampireCountSelect">
+              <option value="1">1 Vampir</option>
+              <option value="2">2 Vampir</option>
+            </select>
+            <label for="nightDurationSelect">Gece Suresi</label>
+            <select id="nightDurationSelect">
+              <option value="10">10 sn</option>
+              <option value="20">20 sn</option>
+              <option value="30" selected>30 sn</option>
+              <option value="45">45 sn</option>
+              <option value="60">60 sn</option>
+            </select>
+          </div>
+
+          <div class="actions control-row">
+            <label for="doctorEnabledSelect">Doktor</label>
+            <select id="doctorEnabledSelect">
+              <option value="true" selected>Acik</option>
+              <option value="false">Kapali</option>
+            </select>
+            <label for="gozcuEnabledSelect">Gozcu</label>
+            <select id="gozcuEnabledSelect">
+              <option value="true" selected>Acik</option>
+              <option value="false">Kapali</option>
+            </select>
+            <label for="gozcuUsesSelect">Gozcu Hakki</label>
+            <select id="gozcuUsesSelect">
+              <option value="1" selected>1 Hak</option>
+              <option value="2">2 Hak</option>
+              <option value="3">3 Hak</option>
+            </select>
+          </div>
+
+          <div class="actions control-row">
+            <button id="startVampireRoundBtn">Oyunu Baslat</button>
+            <button id="resetVampireRoundBtn" class="secondary">Sifirla</button>
+          </div>
         </div>
 
-        <div class="actions">
-          <label for="doctorEnabledSelect">Doktor</label>
-          <select id="doctorEnabledSelect">
-            <option value="true" selected>Acik</option>
-            <option value="false">Kapali</option>
-          </select>
-          <label for="gozcuEnabledSelect">Gozcu</label>
-          <select id="gozcuEnabledSelect">
-            <option value="true" selected>Acik</option>
-            <option value="false">Kapali</option>
-          </select>
-          <label for="gozcuUsesSelect">Gozcu Hakki</label>
-          <select id="gozcuUsesSelect">
-            <option value="1" selected>1 Hak</option>
-            <option value="2">2 Hak</option>
-            <option value="3">3 Hak</option>
-          </select>
+        <div class="control-block">
+          <h3 class="control-title">Faz Yonetimi</h3>
+          <div class="actions control-row">
+            <button id="resolveNightBtn" class="secondary">Geceyi Erken Bitir (Host)</button>
+            <button id="startNightBtn" class="secondary">Yeni Gece Baslat</button>
+          </div>
+          <p class="muted">
+            Geceyi Erken Bitir: sadece host icin zorlayici bitis butonu.
+            Normalde gece, tum vampir + doktor secimi tamamlaninca veya sayac dolunca biter.
+            Iki vampir varsa ayni hedefte mutabakat yoksa kimse elenmez.
+            Gece fazinda oyuncu ekranlarinda genel sohbet ve vampir ozel sohbeti aktif olur.
+          </p>
         </div>
 
-        <div class="actions">
-          <button id="startVampireRoundBtn">Oyunu Baslat</button>
-          <button id="resetVampireRoundBtn" class="secondary">Sifirla</button>
-        </div>
-
-        <div class="actions">
-          <button id="resolveNightBtn" class="secondary">Geceyi Erken Bitir (Host)</button>
-          <button id="startNightBtn" class="secondary">Yeni Gece Baslat</button>
-        </div>
-        <p class="muted">
-          Geceyi Erken Bitir: sadece host icin zorlayici bitis butonu.
-          Normalde gece, tum vampir + doktor secimi tamamlaninca veya sayac dolunca biter.
-          Iki vampir varsa ayni hedefte mutabakat yoksa kimse elenmez.
-          Gece fazinda oyuncu ekranlarinda genel sohbet ve vampir ozel sohbeti aktif olur.
-        </p>
-
-        <div class="actions">
-          <label for="dayEliminateSelect">Gunduz Oylamasi (Host)</label>
-          <select id="dayEliminateSelect"></select>
-          <button id="dayEliminateBtn" class="danger">Oyuncuyu Ele</button>
+        <div class="control-block">
+          <h3 class="control-title">Gunduz Karari</h3>
+          <div class="actions control-row">
+            <label for="dayEliminateSelect">Gunduz Oylamasi (Host)</label>
+            <select id="dayEliminateSelect"></select>
+            <button id="dayEliminateBtn" class="danger">Oyuncuyu Ele</button>
+          </div>
         </div>
       </div>
 
-      <p id="hostMessage" class="message"></p>
+      <p id="hostMessage" class="message" aria-live="polite"></p>
     </section>
 
-    <section class="panel">
+    <section class="panel players-panel">
       <h2>Oyuncular</h2>
       <ul id="playerList" class="player-list"></ul>
     </section>
