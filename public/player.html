@@ -42,6 +42,29 @@
         <p id="vampireConsensusText" class="muted"></p>
       </div>
 
+      <div id="nightChatPanel" class="panel action-card hidden">
+        <h2>Gece Sohbeti</h2>
+        <p id="chatInfoText" class="muted"></p>
+
+        <div class="stack">
+          <h3>Genel Sohbet</h3>
+          <div id="generalChatList" class="chat-list"></div>
+          <div class="actions">
+            <input id="generalChatInput" type="text" maxlength="220" placeholder="Genel sohbete yaz..." />
+            <button id="sendGeneralChatBtn" class="secondary">Gonder</button>
+          </div>
+        </div>
+
+        <div id="vampireChatSection" class="stack hidden">
+          <h3>Vampir Ozel Sohbet</h3>
+          <div id="vampireChatList" class="chat-list"></div>
+          <div class="actions">
+            <input id="vampireChatInput" type="text" maxlength="220" placeholder="Vampir ozel sohbete yaz..." />
+            <button id="sendVampireChatBtn" class="danger">Vampir Sohbetine Gonder</button>
+          </div>
+        </div>
+      </div>
+
       <p id="summaryText" class="muted hidden"></p>
       <p id="playerMessage" class="message"></p>
     </section>
@@ -81,6 +104,15 @@
     const vampireTeamText = document.getElementById("vampireTeamText");
     const vampireVoteList = document.getElementById("vampireVoteList");
     const vampireConsensusText = document.getElementById("vampireConsensusText");
+    const nightChatPanel = document.getElementById("nightChatPanel");
+    const chatInfoText = document.getElementById("chatInfoText");
+    const generalChatList = document.getElementById("generalChatList");
+    const generalChatInput = document.getElementById("generalChatInput");
+    const sendGeneralChatBtn = document.getElementById("sendGeneralChatBtn");
+    const vampireChatSection = document.getElementById("vampireChatSection");
+    const vampireChatList = document.getElementById("vampireChatList");
+    const vampireChatInput = document.getElementById("vampireChatInput");
+    const sendVampireChatBtn = document.getElementById("sendVampireChatBtn");
     const summaryText = document.getElementById("summaryText");
     const playerMessage = document.getElementById("playerMessage");
     const popupOverlay = document.getElementById("popupOverlay");
@@ -100,6 +132,13 @@
     let vampireTeam = [];
     let vampireVoteState = [];
     let vampireConsensus = false;
+    let nightChatState = {
+      isNight: false,
+      canGeneral: false,
+      canVampire: false,
+      general: [],
+      vampire: []
+    };
 
     roomCodeText.textContent = roomCode || "-";
 
@@ -171,10 +210,74 @@
       summaryText.textContent = `Hayatta kalanlar - Toplam: ${summary.aliveTotal}, Vampir: ${summary.aliveVampires}, Koylu tarafi: ${summary.aliveVillagers}`;
     }
 
+    function formatChatTime(ts) {
+      if (!ts) {
+        return "--:--";
+      }
+      const date = new Date(ts);
+      const hour = String(date.getHours()).padStart(2, "0");
+      const min = String(date.getMinutes()).padStart(2, "0");
+      return `${hour}:${min}`;
+    }
+
+    function renderChatList(container, messages) {
+      container.innerHTML = "";
+      for (const msg of messages) {
+        const row = document.createElement("p");
+        row.className = "chat-line";
+        const sender = msg.senderName || "Oyuncu";
+        row.textContent = `[${formatChatTime(msg.sentAt)}] ${sender}: ${msg.text}`;
+        container.appendChild(row);
+      }
+      if (!messages || messages.length === 0) {
+        const row = document.createElement("p");
+        row.className = "chat-line muted";
+        row.textContent = "Henuz mesaj yok.";
+        container.appendChild(row);
+      }
+      container.scrollTop = container.scrollHeight;
+    }
+
+    function resetNightChatState() {
+      nightChatState = {
+        isNight: false,
+        canGeneral: false,
+        canVampire: false,
+        general: [],
+        vampire: []
+      };
+    }
+
+    function renderNightChatPanels() {
+      const canShowNightChat = joined && currentGame === "vampire" && currentPhase === "night";
+      nightChatPanel.classList.toggle("hidden", !canShowNightChat);
+      if (!canShowNightChat) {
+        return;
+      }
+
+      const canGeneral = Boolean(nightChatState.canGeneral);
+      const canVampire = Boolean(nightChatState.canVampire);
+      chatInfoText.textContent = canGeneral
+        ? "Gece sohbeti acik. Vampirler genel sohbete de yazabilir."
+        : "Gece sohbeti bu oyuncu icin kapali.";
+
+      generalChatInput.disabled = !canGeneral;
+      sendGeneralChatBtn.disabled = !canGeneral;
+      renderChatList(generalChatList, nightChatState.general || []);
+
+      vampireChatSection.classList.toggle("hidden", !canVampire);
+      vampireChatInput.disabled = !canVampire;
+      sendVampireChatBtn.disabled = !canVampire;
+      if (canVampire) {
+        renderChatList(vampireChatList, nightChatState.vampire || []);
+      }
+    }
+
     function resetVampireIntelData() {
       vampireTeam = [];
       vampireVoteState = [];
       vampireConsensus = false;
+      resetNightChatState();
     }
 
     function renderVampireIntel() {
@@ -218,6 +321,7 @@
         actionPanel.classList.add("hidden");
         renderNightCountdown();
         renderVampireIntel();
+        renderNightChatPanels();
         return;
       }
 
@@ -225,6 +329,7 @@
         actionPanel.classList.add("hidden");
         renderNightCountdown();
         renderVampireIntel();
+        renderNightChatPanels();
         return;
       }
 
@@ -232,6 +337,7 @@
         actionPanel.classList.add("hidden");
         renderNightCountdown();
         renderVampireIntel();
+        renderNightChatPanels();
         return;
       }
 
@@ -262,6 +368,7 @@
       actionPanel.classList.toggle("hidden", targetCandidates.length === 0);
       renderNightCountdown();
       renderVampireIntel();
+      renderNightChatPanels();
     }
 
     function renderImpostor(payload) {
@@ -281,6 +388,7 @@
         roleInfo.textContent = "";
         clueWrapper.classList.add("hidden");
         renderNightCountdown();
+        renderNightChatPanels();
         return;
       }
 
@@ -298,6 +406,7 @@
       actionPanel.classList.add("hidden");
       renderVampireIntel();
       renderNightCountdown();
+      renderNightChatPanels();
     }
 
     function renderVampire(payload) {
@@ -314,6 +423,7 @@
       vampireConsensus = Boolean(payload.consensusAchieved);
       renderWinner(payload.winner || null);
       renderSummary(payload.summary || null);
+      renderNightChatPanels();
 
       if (payload.role === "waiting") {
         roleTitle.textContent = "Beklemede";
@@ -365,12 +475,44 @@
       }
     });
 
+    function sendGeneralChat() {
+      const text = generalChatInput.value.trim();
+      if (!text) {
+        return;
+      }
+      socket.emit("chat:send_general", { roomCode, message: text });
+      generalChatInput.value = "";
+    }
+
+    function sendVampireChat() {
+      const text = vampireChatInput.value.trim();
+      if (!text) {
+        return;
+      }
+      socket.emit("chat:send_vampire", { roomCode, message: text });
+      vampireChatInput.value = "";
+    }
+
+    sendGeneralChatBtn.addEventListener("click", sendGeneralChat);
+    sendVampireChatBtn.addEventListener("click", sendVampireChat);
+    generalChatInput.addEventListener("keydown", (event) => {
+      if (event.key === "Enter") {
+        sendGeneralChat();
+      }
+    });
+    vampireChatInput.addEventListener("keydown", (event) => {
+      if (event.key === "Enter") {
+        sendVampireChat();
+      }
+    });
+
     socket.on("player:joined", (payload) => {
       joined = true;
       currentGame = payload.gameType;
       joinForm.classList.add("hidden");
       statusText.textContent = `Odaya katildin: ${payload.playerName}. Tur bekleniyor...`;
       setMessage("");
+      renderNightChatPanels();
     });
 
     socket.on("room:update", (payload) => {
@@ -383,6 +525,7 @@
       renderWinner(payload.winner || null);
       renderSummary(payload.summary || null);
       showActionPanel();
+      renderNightChatPanels();
     });
 
     socket.on("vampire:vote_state", (payload) => {
@@ -395,6 +538,35 @@
       vampireConsensus = Boolean(payload.consensusAchieved);
       renderVampireIntel();
       showActionPanel();
+      renderNightChatPanels();
+    });
+
+    socket.on("chat:state", (payload) => {
+      if (!payload || payload.roomCode !== roomCode) {
+        return;
+      }
+      nightChatState = {
+        isNight: Boolean(payload.isNight),
+        canGeneral: Boolean(payload.canGeneral),
+        canVampire: Boolean(payload.canVampire),
+        general: Array.isArray(payload.general) ? payload.general : [],
+        vampire: Array.isArray(payload.vampire) ? payload.vampire : []
+      };
+      renderNightChatPanels();
+    });
+
+    socket.on("chat:message", (payload) => {
+      if (!payload || !payload.entry || !payload.channel) {
+        return;
+      }
+      if (payload.channel === "general") {
+        nightChatState.general = [...(nightChatState.general || []), payload.entry].slice(-80);
+      } else if (payload.channel === "vampire") {
+        nightChatState.vampire = [...(nightChatState.vampire || []), payload.entry].slice(-80);
+      } else {
+        return;
+      }
+      renderNightChatPanels();
     });
 
     socket.on("round:assigned", (payload) => {
@@ -419,6 +591,7 @@
       setMessage(message);
       openPopup("Gece Sonucu", message);
       renderNightCountdown();
+      renderNightChatPanels();
     });
 
     socket.on("vampire:day_result", (payload) => {
@@ -430,6 +603,7 @@
       const text = payload.winner === "vampir" ? "Vampirler kazandi." : "Koyluler kazandi.";
       setMessage(`Oyun bitti. ${text}`);
       openPopup("Oyun Bitti", `Kazanan taraf: ${payload.winner === "vampir" ? "Vampirler" : "Koyluler"}`);
+      renderNightChatPanels();
     });
 
     socket.on("vampire:inspect_result", (payload) => {

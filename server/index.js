@@ -16,6 +16,9 @@ const API_TIMEOUT_MS = Number(process.env.API_TIMEOUT_MS || 3000);
 const NIGHT_DURATION_SEC = Number(process.env.NIGHT_DURATION_SEC || 30);
 const ROOM_IDLE_TTL_MS = Number(process.env.ROOM_IDLE_TTL_MS || (1000 * 60 * 90));
 const ROOM_SWEEP_INTERVAL_MS = Number(process.env.ROOM_SWEEP_INTERVAL_MS || (1000 * 60 * 5));
+const CHAT_MSG_MAX_LEN = Number(process.env.CHAT_MSG_MAX_LEN || 220);
+const CHAT_MSG_RATE_WINDOW_SEC = Number(process.env.CHAT_MSG_RATE_WINDOW_SEC || 3);
+const CHAT_MSG_RATE_MAX = Number(process.env.CHAT_MSG_RATE_MAX || 5);
 
 const app = express();
 const server = http.createServer(app);
@@ -27,6 +30,7 @@ const contentProvider = new ContentProvider({
 
 const rooms = new Map();
 const joinRate = new Map();
+const chatRate = new Map();
 const socketRoom = new Map();
 const nightTimers = new Map();
 
@@ -51,6 +55,20 @@ function isJoinRateLimited(ip) {
   recent.push(current);
   joinRate.set(ip, recent);
   return recent.length > maxHits;
+}
+
+function isChatRateLimited(socketId) {
+  const current = nowSec();
+  const bucket = chatRate.get(socketId) || [];
+  const recent = bucket.filter((ts) => current - ts <= CHAT_MSG_RATE_WINDOW_SEC);
+  recent.push(current);
+  chatRate.set(socketId, recent);
+  return recent.length > CHAT_MSG_RATE_MAX;
+}
+
+function sanitizeChatMessage(value) {
+  const text = String(value || "").trim().replace(/\s+/g, " ");
+  return text.slice(0, CHAT_MSG_MAX_LEN);
 }
 
 function generateRoomCode() {
@@ -91,6 +109,11 @@ function createRoom(gameType) {
     createdAt: Date.now(),
     lastActivityAt: Date.now(),
     hostKey: generateHostKey(),
+    nightChat: {
+      nightId: 0,
+      general: [],
+      vampire: []
+    },
     engine
   };
   rooms.set(roomCode, room);
@@ -134,6 +157,86 @@ function isValidHostKey(room, providedHostKey) {
     return false;
   }
   return crypto.timingSafeEqual(expected, provided);
+}
+
+function getNightChat(room) {
+  if (!room.nightChat) {
+    room.nightChat = {
+      nightId: 0,
+      general: [],
+      vampire: []
+    };
+  }
+  return room.nightChat;
+}
+
+function resetNightChat(room) {
+  if (!room || room.gameType !== "vampire") {
+    return;
+  }
+  const nightChat = getNightChat(room);
+  nightChat.nightId += 1;
+  nightChat.general = [];
+  nightChat.vampire = [];
+}
+
+function pushNightChatMessage(room, channel, entry) {
+  if (!room || room.gameType !== "vampire") {
+    return;
+  }
+  const nightChat = getNightChat(room);
+  const target = channel === "vampire" ? nightChat.vampire : nightChat.general;
+  target.push(entry);
+  const maxEntries = 80;
+  if (target.length > maxEntries) {
+    target.splice(0, target.length - maxEntries);
+  }
+}
+
+function buildNightChatStateForPlayer(room, playerId) {
+  const player = room.engine.players.get(playerId) || null;
+  const isNight = room.gameType === "vampire"
+    && room.engine.roundActive
+    && room.engine.phase === "night";
+  const canGeneral = Boolean(player && isNight);
+  const canVampire = Boolean(player && player.alive && player.role === "vampir" && isNight);
+  const nightChat = getNightChat(room);
+
+  return {
+    roomCode: room.code,
+    isNight,
+    canGeneral,
+    canVampire,
+    general: canGeneral ? nightChat.general.map((entry) => ({ ...entry })) : [],
+    vampire: canVampire ? nightChat.vampire.map((entry) => ({ ...entry })) : []
+  };
+}
+
+function emitNightChatState(room) {
+  if (!room || room.gameType !== "vampire") {
+    return;
+  }
+  for (const playerId of room.engine.players.keys()) {
+    io.to(playerId).emit("chat:state", buildNightChatStateForPlayer(room, playerId));
+  }
+}
+
+function emitGeneralChatMessage(room, entry) {
+  io.to(room.code).emit("chat:message", {
+    channel: "general",
+    entry
+  });
+}
+
+function emitVampireChatMessage(room, entry) {
+  for (const player of room.engine.players.values()) {
+    if (player.alive && player.role === "vampir") {
+      io.to(player.id).emit("chat:message", {
+        channel: "vampire",
+        entry
+      });
+    }
+  }
 }
 
 function emitRoomUpdate(room) {
@@ -194,13 +297,16 @@ function resolveNightForRoom(room, reason) {
       reason: "night"
     });
     room.engine.resetRound();
+    resetNightChat(room);
     emitRoleAssignments(room);
     emitVampireVoteState(room);
+    emitNightChatState(room);
     emitRoomUpdate(room);
     return;
   }
   emitRoleAssignments(room);
   emitVampireVoteState(room);
+  emitNightChatState(room);
   emitRoomUpdate(room);
 }
 
@@ -333,6 +439,7 @@ io.on("connection", (socket) => {
     if (payload) {
       socket.emit("round:assigned", payload);
     }
+    emitNightChatState(room);
   });
 
   socket.on("host:start_round", async ({ roomCode, options }) => {
@@ -375,9 +482,11 @@ io.on("connection", (socket) => {
     }
 
     room.engine.startRound(canStart.options);
+    resetNightChat(room);
     scheduleNightResolution(room);
     emitRoleAssignments(room);
     emitVampireVoteState(room);
+    emitNightChatState(room);
     emitRoomUpdate(room);
   });
 
@@ -390,9 +499,11 @@ io.on("connection", (socket) => {
 
     touchRoom(room);
     room.engine.resetRound();
+    resetNightChat(room);
     clearNightTimer(room.code);
     emitRoleAssignments(room);
     emitVampireVoteState(room);
+    emitNightChatState(room);
     emitRoomUpdate(room);
   });
 
@@ -425,9 +536,11 @@ io.on("connection", (socket) => {
     }
 
     touchRoom(room);
+    resetNightChat(room);
     scheduleNightResolution(room);
     emitRoleAssignments(room);
     emitVampireVoteState(room);
+    emitNightChatState(room);
     emitRoomUpdate(room);
   });
 
@@ -454,13 +567,16 @@ io.on("connection", (socket) => {
         reason: "day"
       });
       room.engine.resetRound();
+      resetNightChat(room);
       emitRoleAssignments(room);
       emitVampireVoteState(room);
+      emitNightChatState(room);
       emitRoomUpdate(room);
       return;
     }
     emitRoleAssignments(room);
     emitVampireVoteState(room);
+    emitNightChatState(room);
     emitRoomUpdate(room);
   });
 
@@ -530,7 +646,82 @@ io.on("connection", (socket) => {
     emitRoomUpdate(room);
   });
 
+  socket.on("chat:send_general", ({ roomCode, message }) => {
+    const room = getRoom(roomCode);
+    if (!room || room.gameType !== "vampire") {
+      socket.emit("round:error", { message: "Sohbet icin vampir odasi bulunamadi." });
+      return;
+    }
+
+    const sender = room.engine.players.get(socket.id);
+    if (!sender) {
+      socket.emit("round:error", { message: "Sohbet izni yok." });
+      return;
+    }
+    if (!room.engine.roundActive || room.engine.phase !== "night") {
+      socket.emit("round:error", { message: "Sohbet sadece gece asamasinda acik." });
+      return;
+    }
+    if (isChatRateLimited(socket.id)) {
+      socket.emit("round:error", { message: "Cok hizli mesaj gonderiyorsun." });
+      return;
+    }
+
+    const text = sanitizeChatMessage(message);
+    if (!text) {
+      return;
+    }
+
+    const entry = {
+      senderId: sender.id,
+      senderName: sender.name,
+      text,
+      sentAt: Date.now()
+    };
+    touchRoom(room);
+    pushNightChatMessage(room, "general", entry);
+    emitGeneralChatMessage(room, entry);
+  });
+
+  socket.on("chat:send_vampire", ({ roomCode, message }) => {
+    const room = getRoom(roomCode);
+    if (!room || room.gameType !== "vampire") {
+      socket.emit("round:error", { message: "Sohbet icin vampir odasi bulunamadi." });
+      return;
+    }
+
+    const sender = room.engine.players.get(socket.id);
+    if (!sender || !sender.alive || sender.role !== "vampir") {
+      socket.emit("round:error", { message: "Vampir ozel sohbetine erisim yok." });
+      return;
+    }
+    if (!room.engine.roundActive || room.engine.phase !== "night") {
+      socket.emit("round:error", { message: "Sohbet sadece gece asamasinda acik." });
+      return;
+    }
+    if (isChatRateLimited(socket.id)) {
+      socket.emit("round:error", { message: "Cok hizli mesaj gonderiyorsun." });
+      return;
+    }
+
+    const text = sanitizeChatMessage(message);
+    if (!text) {
+      return;
+    }
+
+    const entry = {
+      senderId: sender.id,
+      senderName: sender.name,
+      text,
+      sentAt: Date.now()
+    };
+    touchRoom(room);
+    pushNightChatMessage(room, "vampire", entry);
+    emitVampireChatMessage(room, entry);
+  });
+
   socket.on("disconnect", () => {
+    chatRate.delete(socket.id);
     const roomCode = socketRoom.get(socket.id);
     if (!roomCode) {
       return;
@@ -551,6 +742,7 @@ io.on("connection", (socket) => {
     }
     emitRoleAssignments(room);
     emitVampireVoteState(room);
+    emitNightChatState(room);
     emitRoomUpdate(room);
   });
 });
@@ -564,6 +756,15 @@ setInterval(() => {
       joinRate.set(ip, recent);
     } else {
       joinRate.delete(ip);
+    }
+  }
+
+  for (const [socketId, bucket] of chatRate.entries()) {
+    const recent = bucket.filter((ts) => nowSec() - ts <= CHAT_MSG_RATE_WINDOW_SEC);
+    if (recent.length > 0) {
+      chatRate.set(socketId, recent);
+    } else {
+      chatRate.delete(socketId);
     }
   }
 

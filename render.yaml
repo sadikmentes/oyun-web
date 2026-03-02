@@ -19,3 +19,9 @@ services:
         value: 5400000
       - key: ROOM_SWEEP_INTERVAL_MS
         value: 300000
+      - key: CHAT_MSG_MAX_LEN
+        value: 220
+      - key: CHAT_MSG_RATE_WINDOW_SEC
+        value: 3
+      - key: CHAT_MSG_RATE_MAX
+        value: 5
