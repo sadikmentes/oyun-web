@@ -47,6 +47,7 @@
       <ul class="player-list">
         <li>Gece sayaci bitince sistem otomatik gece sonucunu aciklar.</li>
         <li>Gece erken bitmesi icin tum vampir + doktor secimi tamamlanmali.</li>
+        <li>Iki vampir varsa ayni hedefte anlasmazlarsa o gece kimse elenmez.</li>
         <li>Host isterse `Geceyi Erken Bitir` ile geceyi manuel kapatabilir.</li>
       </ul>
       <p id="homeMessage" class="message"></p>
@@ -73,7 +74,10 @@
           throw new Error("Oda olusturulamadi.");
         }
         const data = await response.json();
-        window.location.href = `/host/${data.roomCode}`;
+        if (data.hostKey) {
+          localStorage.setItem(`hostKey:${data.roomCode}`, data.hostKey);
+        }
+        window.location.href = `/host/${data.roomCode}?hostKey=${encodeURIComponent(data.hostKey || "")}`;
       } catch (error) {
         setMessage(error.message, true);
       }

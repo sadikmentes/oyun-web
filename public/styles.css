@@ -283,6 +283,11 @@ img#qrImage {
   color: #2a405f;
 }
 
+.player-list.compact {
+  padding-left: 20px;
+  gap: 4px;
+}
+
 .panel:hover {
   box-shadow: var(--shadow-hover);
 }

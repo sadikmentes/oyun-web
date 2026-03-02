@@ -87,6 +87,7 @@
         <p class="muted">
           Geceyi Erken Bitir: sadece host icin zorlayici bitis butonu.
           Normalde gece, tum vampir + doktor secimi tamamlaninca veya sayac dolunca biter.
+          Iki vampir varsa ayni hedefte mutabakat yoksa kimse elenmez.
         </p>
 
         <div class="actions">
@@ -117,6 +118,16 @@
   <script>
     const socket = io();
     const roomCode = (window.location.pathname.split("/")[2] || "").toUpperCase();
+    const queryParams = new URLSearchParams(window.location.search);
+    const hostKeyStorageKey = `hostKey:${roomCode}`;
+    const hostKeyFromQuery = queryParams.get("hostKey");
+    if (hostKeyFromQuery) {
+      localStorage.setItem(hostKeyStorageKey, hostKeyFromQuery);
+      if (roomCode) {
+        window.history.replaceState({}, "", `/host/${roomCode}`);
+      }
+    }
+    const hostKey = hostKeyFromQuery || localStorage.getItem(hostKeyStorageKey) || "";
 
     const hostTitle = document.getElementById("hostTitle");
     const roomCodeText = document.getElementById("roomCodeText");
@@ -280,6 +291,9 @@
       if (!roomCode) {
         throw new Error("Gecersiz oda.");
       }
+      if (!hostKey) {
+        throw new Error("Host anahtari eksik. Odayi ana ekrandan tekrar olustur.");
+      }
       const response = await fetch(`/api/rooms/${roomCode}`);
       if (!response.ok) {
         throw new Error("Oda bulunamadi.");
@@ -290,7 +304,7 @@
       maxPlayers.textContent = String(data.maxPlayers);
       renderControls();
       await refreshQr();
-      socket.emit("host:register", { roomCode });
+      socket.emit("host:register", { roomCode, hostKey });
     }
 
     socket.on("host:registered", (payload) => {
@@ -336,7 +350,10 @@
     socket.on("vampire:night_result", (payload) => {
       const killed = payload.killedPlayerName ? `${payload.killedPlayerName} elendi.` : "Kimse elenmedi.";
       const reasonText = payload.reason === "timeout" ? "Sure bitti. " : "";
-      const text = `Gece sonucu: ${reasonText}${killed}`;
+      const consensusText = payload.consensusAchieved === false
+        ? "Vampirler ayni hedefte anlasamadi. "
+        : "";
+      const text = `Gece sonucu: ${reasonText}${consensusText}${killed}`;
       setMessage(text);
       openPopup("Gece Sonucu", text);
     });

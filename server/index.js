@@ -1,5 +1,6 @@
 require("dotenv").config();
 
+const crypto = require("crypto");
 const path = require("path");
 const express = require("express");
 const http = require("http");
@@ -13,6 +14,8 @@ const PORT = Number(process.env.PORT || 3000);
 const MAX_PLAYERS = Number(process.env.MAX_PLAYERS || 12);
 const API_TIMEOUT_MS = Number(process.env.API_TIMEOUT_MS || 3000);
 const NIGHT_DURATION_SEC = Number(process.env.NIGHT_DURATION_SEC || 30);
+const ROOM_IDLE_TTL_MS = Number(process.env.ROOM_IDLE_TTL_MS || (1000 * 60 * 90));
+const ROOM_SWEEP_INTERVAL_MS = Number(process.env.ROOM_SWEEP_INTERVAL_MS || (1000 * 60 * 5));
 
 const app = express();
 const server = http.createServer(app);
@@ -59,6 +62,10 @@ function generateRoomCode() {
   return code;
 }
 
+function generateHostKey() {
+  return crypto.randomBytes(24).toString("hex");
+}
+
 function normalizeGameType(value) {
   const type = String(value || "").trim().toLowerCase();
   if (type === "vampire") {
@@ -82,17 +89,51 @@ function createRoom(gameType) {
     code: roomCode,
     gameType: normalizedType,
     createdAt: Date.now(),
+    lastActivityAt: Date.now(),
+    hostKey: generateHostKey(),
     engine
   };
   rooms.set(roomCode, room);
   return room;
 }
 
+function touchRoom(room) {
+  if (!room) {
+    return;
+  }
+  room.lastActivityAt = Date.now();
+}
+
 function getRoom(roomCode) {
   if (!roomCode) {
     return null;
   }
-  return rooms.get(String(roomCode).trim().toUpperCase()) || null;
+  const room = rooms.get(String(roomCode).trim().toUpperCase()) || null;
+  if (room) {
+    touchRoom(room);
+  }
+  return room;
+}
+
+function deleteRoom(roomCode) {
+  const normalizedCode = String(roomCode || "").trim().toUpperCase();
+  if (!normalizedCode) {
+    return;
+  }
+  clearNightTimer(normalizedCode);
+  rooms.delete(normalizedCode);
+}
+
+function isValidHostKey(room, providedHostKey) {
+  if (!room || !room.hostKey) {
+    return false;
+  }
+  const expected = Buffer.from(room.hostKey);
+  const provided = Buffer.from(String(providedHostKey || ""));
+  if (expected.length !== provided.length) {
+    return false;
+  }
+  return crypto.timingSafeEqual(expected, provided);
 }
 
 function emitRoomUpdate(room) {
@@ -106,6 +147,18 @@ function emitRoleAssignments(room) {
   for (const playerId of room.engine.players.keys()) {
     const payload = room.engine.getPlayerRolePayload(playerId);
     io.to(playerId).emit("round:assigned", payload);
+  }
+}
+
+function emitVampireVoteState(room) {
+  if (!room || room.gameType !== "vampire") {
+    return;
+  }
+  for (const player of room.engine.players.values()) {
+    const payload = room.engine.getVampireNightIntel(player.id);
+    if (payload) {
+      io.to(player.id).emit("vampire:vote_state", payload);
+    }
   }
 }
 
@@ -129,6 +182,7 @@ function resolveNightForRoom(room, reason) {
   if (!result.ok) {
     return;
   }
+  touchRoom(room);
   clearNightTimer(room.code);
   io.to(room.code).emit("vampire:night_result", {
     ...result,
@@ -141,10 +195,12 @@ function resolveNightForRoom(room, reason) {
     });
     room.engine.resetRound();
     emitRoleAssignments(room);
+    emitVampireVoteState(room);
     emitRoomUpdate(room);
     return;
   }
   emitRoleAssignments(room);
+  emitVampireVoteState(room);
   emitRoomUpdate(room);
 }
 
@@ -189,7 +245,8 @@ app.post("/api/rooms", (req, res) => {
   res.json({
     roomCode: room.code,
     gameType: room.gameType,
-    maxPlayers: MAX_PLAYERS
+    maxPlayers: MAX_PLAYERS,
+    hostKey: room.hostKey
   });
 });
 
@@ -222,12 +279,17 @@ app.get("/api/qr", async (req, res) => {
 });
 
 io.on("connection", (socket) => {
-  socket.on("host:register", ({ roomCode }) => {
+  socket.on("host:register", ({ roomCode, hostKey }) => {
     const room = getRoom(roomCode);
     if (!room) {
       socket.emit("round:error", { message: "Oda bulunamadi." });
       return;
     }
+    if (!isValidHostKey(room, hostKey)) {
+      socket.emit("round:error", { message: "Host yetkisi dogrulanamadi." });
+      return;
+    }
+    touchRoom(room);
     room.engine.registerHost(socket.id);
     socketRoom.set(socket.id, room.code);
     socket.join(room.code);
@@ -258,6 +320,7 @@ io.on("connection", (socket) => {
       return;
     }
 
+    touchRoom(room);
     socketRoom.set(socket.id, room.code);
     socket.join(room.code);
     socket.emit("player:joined", {
@@ -278,6 +341,7 @@ io.on("connection", (socket) => {
       socket.emit("round:error", { message: "Bu islem sadece host tarafindan yapilabilir." });
       return;
     }
+    touchRoom(room);
 
     if (room.gameType === "impostor") {
       const canStart = room.engine.canStartRound();
@@ -313,6 +377,7 @@ io.on("connection", (socket) => {
     room.engine.startRound(canStart.options);
     scheduleNightResolution(room);
     emitRoleAssignments(room);
+    emitVampireVoteState(room);
     emitRoomUpdate(room);
   });
 
@@ -323,9 +388,11 @@ io.on("connection", (socket) => {
       return;
     }
 
+    touchRoom(room);
     room.engine.resetRound();
     clearNightTimer(room.code);
     emitRoleAssignments(room);
+    emitVampireVoteState(room);
     emitRoomUpdate(room);
   });
 
@@ -340,6 +407,7 @@ io.on("connection", (socket) => {
       socket.emit("round:error", { message: "Gece asamasi aktif degil." });
       return;
     }
+    touchRoom(room);
     resolveNightForRoom(room, "host");
   });
 
@@ -356,8 +424,10 @@ io.on("connection", (socket) => {
       return;
     }
 
+    touchRoom(room);
     scheduleNightResolution(room);
     emitRoleAssignments(room);
+    emitVampireVoteState(room);
     emitRoomUpdate(room);
   });
 
@@ -374,6 +444,7 @@ io.on("connection", (socket) => {
       return;
     }
 
+    touchRoom(room);
     io.to(room.code).emit("vampire:day_result", {
       eliminatedPlayerName: result.eliminatedPlayerName
     });
@@ -384,10 +455,12 @@ io.on("connection", (socket) => {
       });
       room.engine.resetRound();
       emitRoleAssignments(room);
+      emitVampireVoteState(room);
       emitRoomUpdate(room);
       return;
     }
     emitRoleAssignments(room);
+    emitVampireVoteState(room);
     emitRoomUpdate(room);
   });
 
@@ -404,7 +477,9 @@ io.on("connection", (socket) => {
       return;
     }
 
+    touchRoom(room);
     socket.emit("action:ok", { message: "Hedef secimi kaydedildi." });
+    emitVampireVoteState(room);
     if (room.engine.isNightReadyToResolve()) {
       resolveNightForRoom(room, "all_voted");
     }
@@ -422,6 +497,7 @@ io.on("connection", (socket) => {
       socket.emit("round:error", { message: protect.reason });
       return;
     }
+    touchRoom(room);
     socket.emit("action:ok", { message: "Koruma secimi kaydedildi." });
     if (room.engine.isNightReadyToResolve()) {
       resolveNightForRoom(room, "all_voted");
@@ -441,6 +517,7 @@ io.on("connection", (socket) => {
       return;
     }
 
+    touchRoom(room);
     socket.emit("vampire:inspect_result", {
       targetName: inspect.targetName,
       targetRole: inspect.targetRole
@@ -467,13 +544,42 @@ io.on("connection", (socket) => {
 
     room.engine.clearHost(socket.id);
     room.engine.removePlayer(socket.id);
-    if (room.engine.players.size === 0) {
-      clearNightTimer(room.code);
+    touchRoom(room);
+    if (room.engine.players.size === 0 && !room.engine.hostSocketId) {
+      deleteRoom(room.code);
+      return;
     }
     emitRoleAssignments(room);
+    emitVampireVoteState(room);
     emitRoomUpdate(room);
   });
 });
+
+setInterval(() => {
+  const now = Date.now();
+
+  for (const [ip, bucket] of joinRate.entries()) {
+    const recent = bucket.filter((ts) => nowSec() - ts <= 10);
+    if (recent.length > 0) {
+      joinRate.set(ip, recent);
+    } else {
+      joinRate.delete(ip);
+    }
+  }
+
+  for (const room of rooms.values()) {
+    const idleMs = now - (room.lastActivityAt || room.createdAt || now);
+    const hasHost = Boolean(room.engine.hostSocketId);
+    const hasPlayers = room.engine.players.size > 0;
+    if (!hasHost && !hasPlayers && idleMs > 60 * 1000) {
+      deleteRoom(room.code);
+      continue;
+    }
+    if (idleMs > ROOM_IDLE_TTL_MS) {
+      deleteRoom(room.code);
+    }
+  }
+}, ROOM_SWEEP_INTERVAL_MS).unref();
 
 server.listen(PORT, () => {
   console.log(`Server running on http://localhost:${PORT}`);

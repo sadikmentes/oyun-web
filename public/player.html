@@ -35,6 +35,13 @@
         <button id="sendActionBtn">Secimi Gonder</button>
       </div>
 
+      <div id="vampireIntelPanel" class="panel action-card hidden">
+        <h2>Vampir Koordinasyonu</h2>
+        <p id="vampireTeamText" class="muted"></p>
+        <ul id="vampireVoteList" class="player-list compact"></ul>
+        <p id="vampireConsensusText" class="muted"></p>
+      </div>
+
       <p id="summaryText" class="muted hidden"></p>
       <p id="playerMessage" class="message"></p>
     </section>
@@ -70,6 +77,10 @@
     const targetLabel = document.getElementById("targetLabel");
     const targetSelect = document.getElementById("targetSelect");
     const sendActionBtn = document.getElementById("sendActionBtn");
+    const vampireIntelPanel = document.getElementById("vampireIntelPanel");
+    const vampireTeamText = document.getElementById("vampireTeamText");
+    const vampireVoteList = document.getElementById("vampireVoteList");
+    const vampireConsensusText = document.getElementById("vampireConsensusText");
     const summaryText = document.getElementById("summaryText");
     const playerMessage = document.getElementById("playerMessage");
     const popupOverlay = document.getElementById("popupOverlay");
@@ -86,6 +97,9 @@
     let countdownTimer = null;
     let players = [];
     let gozcuUsesLeft = 0;
+    let vampireTeam = [];
+    let vampireVoteState = [];
+    let vampireConsensus = false;
 
     roomCodeText.textContent = roomCode || "-";
 
@@ -157,22 +171,67 @@
       summaryText.textContent = `Hayatta kalanlar - Toplam: ${summary.aliveTotal}, Vampir: ${summary.aliveVampires}, Koylu tarafi: ${summary.aliveVillagers}`;
     }
 
+    function resetVampireIntelData() {
+      vampireTeam = [];
+      vampireVoteState = [];
+      vampireConsensus = false;
+    }
+
+    function renderVampireIntel() {
+      if (currentGame !== "vampire" || myRole !== "vampir") {
+        vampireIntelPanel.classList.add("hidden");
+        return;
+      }
+
+      vampireIntelPanel.classList.remove("hidden");
+      const teammateNames = vampireTeam
+        .filter((member) => member.id !== socket.id)
+        .map((member) => member.name);
+      vampireTeamText.textContent = teammateNames.length > 0
+        ? `Diger vampir(ler): ${teammateNames.join(", ")}`
+        : "Bu turda tek vampirsin.";
+
+      vampireVoteList.innerHTML = "";
+      for (const vote of vampireVoteState) {
+        const li = document.createElement("li");
+        const targetText = vote.targetPlayerName ? vote.targetPlayerName : "secim yapmadi";
+        li.textContent = `${vote.vampireName} -> ${targetText}`;
+        vampireVoteList.appendChild(li);
+      }
+      if (vampireVoteState.length === 0) {
+        const li = document.createElement("li");
+        li.textContent = "Henuz secim yapilmadi.";
+        vampireVoteList.appendChild(li);
+      }
+
+      if (currentPhase !== "night") {
+        vampireConsensusText.textContent = "Koordinasyon bilgisi gece fazinda guncellenir.";
+      } else if (vampireConsensus) {
+        vampireConsensusText.textContent = "Mutabakat var: ayni hedef secildi.";
+      } else {
+        vampireConsensusText.textContent = "Mutabakat yoksa gece sonunda kimse elenmez.";
+      }
+    }
+
     function showActionPanel() {
       if (currentGame !== "vampire" || currentPhase !== "night" || !myAlive) {
         actionPanel.classList.add("hidden");
         renderNightCountdown();
+        renderVampireIntel();
         return;
       }
 
       if (myRole !== "vampir" && myRole !== "doktor" && myRole !== "gozcu") {
         actionPanel.classList.add("hidden");
         renderNightCountdown();
+        renderVampireIntel();
         return;
       }
 
       if (myRole === "gozcu" && gozcuUsesLeft <= 0) {
         actionPanel.classList.add("hidden");
         renderNightCountdown();
+        renderVampireIntel();
         return;
       }
 
@@ -202,6 +261,7 @@
       }
       actionPanel.classList.toggle("hidden", targetCandidates.length === 0);
       renderNightCountdown();
+      renderVampireIntel();
     }
 
     function renderImpostor(payload) {
@@ -211,6 +271,7 @@
       myAlive = true;
       currentPhase = "active";
       nightEndsAt = null;
+      resetVampireIntelData();
       renderWinner(null);
       renderSummary(null);
 
@@ -235,6 +296,7 @@
         clueWrapper.classList.remove("hidden");
       }
       actionPanel.classList.add("hidden");
+      renderVampireIntel();
       renderNightCountdown();
     }
 
@@ -247,6 +309,9 @@
       currentPhase = payload.phase || currentPhase;
       nightEndsAt = payload.nightEndsAt || null;
       players = Array.isArray(payload.players) ? payload.players : players;
+      vampireTeam = Array.isArray(payload.vampireTeam) ? payload.vampireTeam : vampireTeam;
+      vampireVoteState = Array.isArray(payload.vampireVoteState) ? payload.vampireVoteState : vampireVoteState;
+      vampireConsensus = Boolean(payload.consensusAchieved);
       renderWinner(payload.winner || null);
       renderSummary(payload.summary || null);
 
@@ -320,6 +385,18 @@
       showActionPanel();
     });
 
+    socket.on("vampire:vote_state", (payload) => {
+      if (currentGame !== "vampire" || myRole !== "vampir" || !payload) {
+        return;
+      }
+      currentPhase = payload.phase || currentPhase;
+      vampireTeam = Array.isArray(payload.vampireTeam) ? payload.vampireTeam : vampireTeam;
+      vampireVoteState = Array.isArray(payload.vampireVoteState) ? payload.vampireVoteState : vampireVoteState;
+      vampireConsensus = Boolean(payload.consensusAchieved);
+      renderVampireIntel();
+      showActionPanel();
+    });
+
     socket.on("round:assigned", (payload) => {
       if (!joined || !payload) {
         return;
@@ -333,9 +410,12 @@
 
     socket.on("vampire:night_result", (payload) => {
       const reasonText = payload.reason === "timeout" ? "Sure bitti. " : "";
+      const consensusText = payload.consensusAchieved === false
+        ? "Vampirler ayni hedefte anlasamadi. "
+        : "";
       const message = payload.killedPlayerName
         ? `Gece sonucu: ${reasonText}${payload.killedPlayerName} elendi.`
-        : `Gece sonucu: ${reasonText}Kimse elenmedi.`;
+        : `Gece sonucu: ${reasonText}${consensusText}Kimse elenmedi.`;
       setMessage(message);
       openPopup("Gece Sonucu", message);
       renderNightCountdown();

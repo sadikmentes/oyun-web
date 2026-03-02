@@ -134,8 +134,16 @@ class GameEngine {
 
   getPlayerRolePayload(socketId) {
     const player = this.players.get(socketId);
-    if (!player || !this.round) {
+    if (!player) {
       return null;
+    }
+
+    if (!this.round) {
+      return {
+        game: "impostor",
+        role: "waiting",
+        category: null
+      };
     }
 
     if (player.roundId !== this.round.id) {

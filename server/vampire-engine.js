@@ -1,11 +1,3 @@
-function pickRandom(arr) {
-  if (!Array.isArray(arr) || arr.length === 0) {
-    return null;
-  }
-  const idx = Math.floor(Math.random() * arr.length);
-  return arr[idx];
-}
-
 function shuffle(arr) {
   const copy = [...arr];
   for (let i = copy.length - 1; i > 0; i -= 1) {
@@ -220,6 +212,38 @@ class VampireEngine {
     return this.getAlivePlayers().find((p) => p.role === "gozcu") || null;
   }
 
+  getAliveVampireTeam() {
+    return this.getAliveVampires().map((player) => ({
+      id: player.id,
+      name: player.name
+    }));
+  }
+
+  getVampireVoteState() {
+    return this.getAliveVampires().map((vampire) => {
+      const targetPlayerId = this.vampireVotes.get(vampire.id) || null;
+      const targetPlayer = targetPlayerId ? this.players.get(targetPlayerId) || null : null;
+      return {
+        vampireId: vampire.id,
+        vampireName: vampire.name,
+        targetPlayerId,
+        targetPlayerName: targetPlayer ? targetPlayer.name : null
+      };
+    });
+  }
+
+  hasVampireConsensus() {
+    const aliveVampires = this.getAliveVampires();
+    if (aliveVampires.length === 0) {
+      return false;
+    }
+    const selectedTargets = aliveVampires.map((vampire) => this.vampireVotes.get(vampire.id) || null);
+    if (selectedTargets.some((targetId) => !targetId)) {
+      return false;
+    }
+    return new Set(selectedTargets).size === 1;
+  }
+
   getSummary() {
     const alive = this.getAlivePlayers();
     return {
@@ -337,24 +361,20 @@ class VampireEngine {
       return { ok: false, reason: "Gece asamasi aktif degil." };
     }
 
-    const counts = new Map();
-    for (const targetId of this.vampireVotes.values()) {
-      counts.set(targetId, (counts.get(targetId) || 0) + 1);
-    }
+    const voteStateBeforeResolve = this.getVampireVoteState();
+    const aliveVampires = this.getAliveVampires();
+    let selectedTargetId = null;
+    let consensusAchieved = false;
 
-    let topScore = 0;
-    let candidates = [];
-    for (const [targetId, score] of counts.entries()) {
-      if (score > topScore) {
-        topScore = score;
-        candidates = [targetId];
-      } else if (score === topScore) {
-        candidates.push(targetId);
-      }
+    if (aliveVampires.length === 1) {
+      selectedTargetId = this.vampireVotes.get(aliveVampires[0].id) || null;
+      consensusAchieved = Boolean(selectedTargetId);
+    } else if (aliveVampires.length > 1 && this.hasVampireConsensus()) {
+      selectedTargetId = this.vampireVotes.get(aliveVampires[0].id) || null;
+      consensusAchieved = Boolean(selectedTargetId);
     }
 
     let killedPlayer = null;
-    const selectedTargetId = candidates.length ? pickRandom(candidates) : null;
     if (selectedTargetId && selectedTargetId !== this.doctorTargetId) {
       killedPlayer = this.players.get(selectedTargetId) || null;
       if (killedPlayer) {
@@ -374,7 +394,9 @@ class VampireEngine {
       ok: true,
       killedPlayerName: killedPlayer ? killedPlayer.name : null,
       protectedPlayerName: protectedPlayer ? protectedPlayer.name : null,
-      winner: this.winner
+      winner: this.winner,
+      consensusAchieved,
+      vampireVoteState: voteStateBeforeResolve
     };
   }
 
@@ -442,11 +464,36 @@ class VampireEngine {
       };
     }
 
+    if (player.role === "vampir") {
+      return {
+        ...base,
+        role: player.role,
+        alive: player.alive,
+        gozcuUsesLeft: player.gozcuUsesLeft || 0,
+        vampireTeam: this.getAliveVampireTeam(),
+        vampireVoteState: this.getVampireVoteState(),
+        consensusAchieved: this.hasVampireConsensus()
+      };
+    }
+
     return {
       ...base,
       role: player.role,
       alive: player.alive,
       gozcuUsesLeft: player.gozcuUsesLeft || 0
+    };
+  }
+
+  getVampireNightIntel(socketId) {
+    const player = this.players.get(socketId);
+    if (!player || !this.roundActive || player.role !== "vampir" || !player.alive) {
+      return null;
+    }
+    return {
+      phase: this.phase,
+      vampireTeam: this.getAliveVampireTeam(),
+      vampireVoteState: this.getVampireVoteState(),
+      consensusAchieved: this.hasVampireConsensus()
     };
   }
 }
