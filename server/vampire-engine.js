@@ -268,7 +268,7 @@ class VampireEngine {
       return this.winner;
     }
 
-    if (aliveVillagers === 0 || aliveVampires === aliveVillagers) {
+    if (aliveVillagers === 0) {
       this.winner = "vampir";
       this.roundActive = false;
       this.phase = "game_over";

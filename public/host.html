@@ -8,6 +8,11 @@
 </head>
 <body>
   <main class="container host-layout">
+    <nav class="top-shortcut" aria-label="Ust navigasyon">
+      <a class="brand-pill" href="/">Parti Oyunlari</a>
+      <a class="home-link" href="/">Ana Menuye Don</a>
+    </nav>
+
     <section class="panel hero">
       <h1 id="hostTitle">Host Panel</h1>
       <p class="lead">Oda kodu ile oyunculari topla, turu baslat, gece-gunduz akisina gore oyunu yonet.</p>
@@ -40,7 +45,7 @@
       </div>
 
       <div id="vampireControls" class="stack hidden control-stack">
-        <div class="control-block">
+        <div id="vampireSetupBlock" class="control-block">
           <h3 class="control-title">Rol ve Gece Ayarlari</h3>
           <div class="actions control-row">
             <label for="vampireCountSelect">Vampir Sayisi</label>
@@ -158,6 +163,7 @@
     const dayEliminateBtn = document.getElementById("dayEliminateBtn");
     const impostorControls = document.getElementById("impostorControls");
     const vampireControls = document.getElementById("vampireControls");
+    const vampireSetupBlock = document.getElementById("vampireSetupBlock");
     const vampireCountSelect = document.getElementById("vampireCountSelect");
     const nightDurationSelect = document.getElementById("nightDurationSelect");
     const doctorEnabledSelect = document.getElementById("doctorEnabledSelect");
@@ -241,6 +247,7 @@
       const canStart = roundState === "waiting";
       startRoundBtn.classList.toggle("hidden", !canStart || isVampire);
       startVampireRoundBtn.classList.toggle("hidden", !canStart || !isVampire);
+      vampireSetupBlock.classList.toggle("hidden", !isVampire || !canStart);
     }
 
     function renderPlayers(list) {
@@ -331,13 +338,13 @@
       winner = payload.winner || null;
       players = payload.players || [];
       nightEndsAt = payload.nightEndsAt || null;
+      roundState = payload.roundState || "waiting";
+      roundStateText.textContent = roundState;
 
       renderControls();
       playerCount.textContent = String(payload.playerCount || 0);
       maxPlayers.textContent = String(payload.maxPlayers || 0);
       phaseText.textContent = phase;
-      roundState = payload.roundState || "waiting";
-      roundStateText.textContent = roundState;
       renderSummary(payload.summary || null);
       renderWinner();
       renderNightCountdown();
